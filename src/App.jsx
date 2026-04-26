@@ -13,7 +13,14 @@ async function rpcCall(method, params = []) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method, params })
   });
-  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(`RPC request failed: ${res.status} ${res.statusText}`);
+  }
+  const text = await res.text();
+  if (!text) {
+    throw new Error('Empty response from node — is it running?');
+  }
+  const data = JSON.parse(text);
   if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
   return data.result;
 }
@@ -52,18 +59,24 @@ function Dashboard() {
         
         <h3 style={{marginTop: '2rem'}}>Active Channels</h3>
         <div className="channelList">
-          {channels.length === 0 ? <p style={{color: '#888'}}>No active channels found.</p> : channels.map(c => (
-            <div className={`channelItem ${c.state_name !== 'ChannelReady' ? 'pending' : ''}`} key={c.channel_id}>
+          {channels.length === 0 ? <p style={{color: '#888'}}>No active channels found.</p> : channels.map(c => {
+            const stateName = c.state?.state_name || c.state_name || 'Unknown';
+            const peerId = c.pubkey || c.peer_id || '';
+            const localBal = parseInt(c.local_balance, 16);
+            const remoteBal = parseInt(c.remote_balance, 16);
+            return (
+            <div className={`channelItem ${stateName !== 'ChannelReady' ? 'pending' : ''}`} key={c.channel_id}>
               <div>
-                <strong>Peer: {c.peer_id.slice(0, 16)}...</strong>
-                <p style={{margin: '0.2rem 0', fontSize: '0.9rem', color: '#888'}}>State: {c.state_name}</p>
+                <strong>Peer: {peerId.slice(0, 16)}...</strong>
+                <p style={{margin: '0.2rem 0', fontSize: '0.9rem', color: '#888'}}>State: {stateName}</p>
               </div>
               <div style={{textAlign: 'right'}}>
-                <div><strong>Local Balance:</strong> {parseInt(c.local_balance, 16).toLocaleString()}</div>
-                <div style={{fontSize: '0.8rem', color: '#888'}}>Capacity: {parseInt(c.capacity, 16).toLocaleString()}</div>
+                <div><strong>Local Balance:</strong> {localBal.toLocaleString()}</div>
+                <div style={{fontSize: '0.8rem', color: '#888'}}>Remote: {remoteBal.toLocaleString()}</div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
