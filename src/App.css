@@ -55,6 +55,13 @@
   animation: fadeIn 0.4s ease-out;
 }
 
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
@@ -118,6 +125,78 @@
   border-left-color: #FFA000;
 }
 
+.channelMeta {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.paymentProofCard {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+}
+
+.proofGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.proofValue {
+  margin-top: 0.35rem;
+  color: #f3f6ff;
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.paymentList {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.paymentItem {
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.24);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.routeList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.routeCard {
+  padding: 0.9rem;
+  background: rgba(12, 18, 34, 0.7);
+  border: 1px solid rgba(116, 123, 255, 0.18);
+  border-radius: 10px;
+}
+
+.routeChain {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.routeHop {
+  min-width: 170px;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  font-family: monospace;
+  color: #f3f6ff;
+}
+
 .formGroup {
   display: flex;
   flex-direction: column;
@@ -166,4 +245,144 @@
   background: rgba(244, 67, 54, 0.1);
   color: #f44336;
   border: 1px solid rgba(244, 67, 54, 0.3);
+}
+
+.statusMessage.warning {
+  background: rgba(255, 160, 0, 0.1);
+  color: #ffca6b;
+  border: 1px solid rgba(255, 160, 0, 0.3);
+}
+
+.secondaryBtn {
+  background: rgba(255, 255, 255, 0.06);
+  color: #d7def7;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.authShell {
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.header.compact h1 {
+  font-size: 2.4rem;
+}
+
+.authPanel {
+  margin-top: 1.5rem;
+}
+
+.muted {
+  color: #8f9bb3;
+}
+
+.buttonRow {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.heroPanel {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.balanceBlock {
+  min-width: 220px;
+  padding: 1rem;
+  border-radius: 10px;
+  background: rgba(116, 123, 255, 0.09);
+  border: 1px solid rgba(116, 123, 255, 0.16);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.balanceBlock strong {
+  font-size: 1.7rem;
+  color: #fff;
+}
+
+.actionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.actionCard {
+  padding: 1.25rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  text-align: left;
+}
+
+.actionCard.wide {
+  margin-bottom: 1rem;
+}
+
+.splitForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: end;
+}
+
+.compactList {
+  margin-top: 1rem;
+}
+
+.rightText {
+  text-align: right;
+}
+
+.statValue.small {
+  font-size: 0.78rem;
+}
+
+.sectionTitle {
+  margin-top: 2rem;
+}
+
+pre {
+  white-space: pre-wrap;
+  margin: 0;
+  color: #f3f6ff;
+}
+
+@media (max-width: 760px) {
+  .heroPanel,
+  .channelItem {
+    flex-direction: column;
+  }
+
+  .actionGrid,
+  .splitForm {
+    grid-template-columns: 1fr;
+  }
+
+  .balanceBlock {
+    min-width: 0;
+  }
+
+  .rightText {
+    text-align: left;
+  }
+}
+
+.secondaryBtn:hover {
+  border-color: rgba(116, 123, 255, 0.4);
+}
+
+.inputHint {
+  margin: 0.4rem 0 0;
+  color: #888;
+  font-size: 0.85rem;
 }
