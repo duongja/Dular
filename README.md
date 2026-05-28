@@ -91,10 +91,14 @@ Dular is built on the **Fiber Network** — a Lightning-style Layer 2 payment ne
 git clone https://github.com/duongja/Dular.git
 cd Dular
 npm install
+npm run migrate
+npm run dev:api
 npm run dev -- --host
 ```
 
 Open **http://localhost:5173** — Dular connects to your local Fiber node automatically.
+
+Copy `.env.example` to `.env` first and set `DATABASE_URL`. Keep `DEMO_MODE=true` for local OTP and M-Pesa provider mocks.
 
 ---
 
