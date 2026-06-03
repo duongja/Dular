@@ -59,6 +59,12 @@ CREATE TABLE IF NOT EXISTS mpesa_transactions (
   conversation_id TEXT UNIQUE,
   originator_conversation_id TEXT UNIQUE,
   receipt_number TEXT,
+  fiber_invoice TEXT,
+  fiber_payment_hash TEXT,
+  fiber_status TEXT,
+  fiber_fee_base_units NUMERIC(32, 0),
+  fiber_route JSONB NOT NULL DEFAULT '[]'::jsonb,
+  credited_at TIMESTAMPTZ,
   provider_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -73,6 +79,8 @@ CREATE TABLE IF NOT EXISTS fiber_payments (
   fee_base_units NUMERIC(32, 0) NOT NULL DEFAULT 0,
   status TEXT NOT NULL,
   route JSONB NOT NULL DEFAULT '[]'::jsonb,
+  source_type TEXT,
+  source_id TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -86,7 +94,34 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS mpesa_callbacks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind TEXT NOT NULL,
+  conversation_id TEXT,
+  originator_conversation_id TEXT,
+  result_code TEXT,
+  receipt_number TEXT,
+  payload JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE mpesa_transactions ADD COLUMN IF NOT EXISTS fiber_invoice TEXT;
+ALTER TABLE mpesa_transactions ADD COLUMN IF NOT EXISTS fiber_payment_hash TEXT;
+ALTER TABLE mpesa_transactions ADD COLUMN IF NOT EXISTS fiber_status TEXT;
+ALTER TABLE mpesa_transactions ADD COLUMN IF NOT EXISTS fiber_fee_base_units NUMERIC(32, 0);
+ALTER TABLE mpesa_transactions ADD COLUMN IF NOT EXISTS fiber_route JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE mpesa_transactions ADD COLUMN IF NOT EXISTS credited_at TIMESTAMPTZ;
+
+ALTER TABLE fiber_payments ADD COLUMN IF NOT EXISTS source_type TEXT;
+ALTER TABLE fiber_payments ADD COLUMN IF NOT EXISTS source_id TEXT;
+
+ALTER TABLE mpesa_callbacks ADD COLUMN IF NOT EXISTS originator_conversation_id TEXT;
+ALTER TABLE mpesa_callbacks ADD COLUMN IF NOT EXISTS result_code TEXT;
+ALTER TABLE mpesa_callbacks ADD COLUMN IF NOT EXISTS receipt_number TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
 CREATE INDEX IF NOT EXISTS idx_otp_phone_created ON otp_requests(phone, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ledger_user_created ON ledger_entries(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mpesa_user_created ON mpesa_transactions(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mpesa_callbacks_created ON mpesa_callbacks(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mpesa_callbacks_conversation ON mpesa_callbacks(conversation_id, originator_conversation_id);

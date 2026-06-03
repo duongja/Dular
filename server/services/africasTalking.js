@@ -29,5 +29,9 @@ export async function sendOtpSms(phone, code) {
   if (!response.ok) {
     throw new Error(payload.errorMessage || 'Africa’s Talking SMS request failed')
   }
+  const rejected = payload.SMSMessageData?.Recipients?.find((recipient) => Number(recipient.statusCode) >= 400)
+  if (rejected) {
+    throw new Error(`Africa’s Talking rejected SMS to ${rejected.number}: ${rejected.status}`)
+  }
   return payload
 }

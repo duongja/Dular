@@ -1,4 +1,5 @@
 import { config } from '../config.js'
+import https from 'node:https'
 
 const BASE_URLS = {
   production: 'https://api.safaricom.co.ke',
@@ -12,20 +13,50 @@ function baseUrl() {
   return BASE_URLS[config.mpesa.environment] || BASE_URLS.production
 }
 
+export async function requestDarajaJson(url, { method = 'GET', headers = {}, body } = {}) {
+  return new Promise((resolve, reject) => {
+    const request = https.request(url, { method, headers, timeout: 45000 }, (response) => {
+      let responseBody = ''
+      response.on('data', (chunk) => {
+        responseBody += chunk
+      })
+      response.on('end', () => {
+        let payload
+        try {
+          payload = responseBody ? JSON.parse(responseBody) : {}
+        } catch {
+          payload = { raw: responseBody }
+        }
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          reject(new Error(payload.errorMessage || payload.ResponseDescription || JSON.stringify(payload)))
+          return
+        }
+        resolve(payload)
+      })
+    })
+    request.on('timeout', () => request.destroy(new Error('Daraja request timed out')))
+    request.on('error', reject)
+    if (body) request.write(body)
+    request.end()
+  })
+}
+
 async function getAccessToken() {
   if (config.demoMode) return 'demo-token'
   if (cachedToken && Date.now() < cachedTokenExpiry) return cachedToken
 
   const credentials = Buffer.from(`${config.mpesa.consumerKey}:${config.mpesa.consumerSecret}`).toString('base64')
-  const response = await fetch(`${baseUrl()}/oauth/v1/generate?grant_type=client_credentials`, {
+  const payload = await requestDarajaJson(`${baseUrl()}/oauth/v1/generate?grant_type=client_credentials`, {
     headers: { Authorization: `Basic ${credentials}` },
   })
-  const payload = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(payload.errorMessage || 'Daraja token request failed')
 
   cachedToken = payload.access_token
   cachedTokenExpiry = Date.now() + Math.max(0, Number(payload.expires_in || 3000) - 60) * 1000
   return cachedToken
+}
+
+export async function getDarajaAccessToken() {
+  return getAccessToken()
 }
 
 function darajaTimestamp() {
@@ -51,7 +82,7 @@ export async function initiateStkPush({ phone, amountKes, accountReference }) {
   const token = await getAccessToken()
   const timestamp = darajaTimestamp()
   const password = Buffer.from(`${config.mpesa.shortcode}${config.mpesa.passkey}${timestamp}`).toString('base64')
-  const response = await fetch(`${baseUrl()}/mpesa/stkpush/v1/processrequest`, {
+  const payload = await requestDarajaJson(`${baseUrl()}/mpesa/stkpush/v1/processrequest`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -71,11 +102,42 @@ export async function initiateStkPush({ phone, amountKes, accountReference }) {
       TransactionDesc: 'Dular RUSD deposit',
     }),
   })
-  const payload = await response.json().catch(() => ({}))
-  if (!response.ok || payload.ResponseCode !== '0') {
+  if (payload.ResponseCode !== '0') {
     throw new Error(payload.errorMessage || payload.ResponseDescription || 'STK Push request failed')
   }
   return payload
+}
+
+export async function queryStkPushStatus({ checkoutRequestId }) {
+  if (!checkoutRequestId) throw new Error('Checkout request id is required')
+
+  if (config.demoMode) {
+    return {
+      ResponseCode: '0',
+      ResponseDescription: 'Demo STK query accepted',
+      MerchantRequestID: `demo-merchant-${Date.now()}`,
+      CheckoutRequestID: checkoutRequestId,
+      ResultCode: '0',
+      ResultDesc: 'Demo STK payment processed successfully.',
+    }
+  }
+
+  const token = await getAccessToken()
+  const timestamp = darajaTimestamp()
+  const password = Buffer.from(`${config.mpesa.shortcode}${config.mpesa.passkey}${timestamp}`).toString('base64')
+  return requestDarajaJson(`${baseUrl()}/mpesa/stkpushquery/v1/query`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      BusinessShortCode: config.mpesa.shortcode,
+      Password: password,
+      Timestamp: timestamp,
+      CheckoutRequestID: checkoutRequestId,
+    }),
+  })
 }
 
 export async function initiateB2c({ phone, amountKes, remarks, occasion }) {
@@ -89,7 +151,7 @@ export async function initiateB2c({ phone, amountKes, remarks, occasion }) {
   }
 
   const token = await getAccessToken()
-  const response = await fetch(`${baseUrl()}/mpesa/b2c/v3/paymentrequest`, {
+  const payload = await requestDarajaJson(`${baseUrl()}/mpesa/b2c/v3/paymentrequest`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -109,8 +171,7 @@ export async function initiateB2c({ phone, amountKes, remarks, occasion }) {
       Occasion: occasion || 'Dular',
     }),
   })
-  const payload = await response.json().catch(() => ({}))
-  if (!response.ok || payload.ResponseCode !== '0') {
+  if (payload.ResponseCode !== '0') {
     throw new Error(payload.errorMessage || payload.ResponseDescription || 'B2C request failed')
   }
   return payload

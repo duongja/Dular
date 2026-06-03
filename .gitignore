@@ -13,6 +13,7 @@ dist-ssr
 *.local
 .env
 .fiber-node-fresh/
+.fiber-node-receiver/
 
 # Editor directories and files
 .vscode/*

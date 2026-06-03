@@ -5,6 +5,8 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL || '',
   sessionSecret: process.env.SESSION_SECRET || 'dev-session-secret-change-me',
   fiberRpcUrl: process.env.FIBER_RPC_URL || 'http://127.0.0.1:8227',
+  fiberReceiverRpcUrl: process.env.FIBER_RECEIVER_RPC_URL || 'http://127.0.0.1:8247',
+  fiberReceiverCkbAddress: process.env.FIBER_RECEIVER_CKB_ADDRESS || '',
   publicBaseUrl: process.env.PUBLIC_BASE_URL || 'http://localhost:8787',
   demoMode: process.env.DEMO_MODE !== 'false',
   mpesa: {
@@ -15,7 +17,7 @@ export const config = {
     passkey: process.env.MPESA_PASSKEY || '',
     b2cShortcode: process.env.MPESA_B2C_SHORTCODE || '',
     initiatorName: process.env.MPESA_INITIATOR_NAME || '',
-    securityCredential: process.env.MPESA_SECURITY_CREDENTIAL || '',
+    securityCredential: process.env.MPESA_SECURITY_CREDENTIAL || process.env.MPESA_PROD_SECURITY_CREDENTIAL || '',
     timeoutUrl: process.env.MPESA_TIMEOUT_URL || '',
   },
   africasTalking: {
