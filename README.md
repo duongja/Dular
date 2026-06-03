@@ -1,229 +1,264 @@
-# Dular — Mobile Money Stablecoin Wallet
+# Dular — Mobile Money Stablecoin Wallet on Fiber Network
 
-**Dular** is an open-source stablecoin wallet designed for **mobile money markets**. It brings instant, near-zero-fee stablecoin transfers to the 1.4 billion people who depend on mobile money — replacing slow settlement rails and high remittance fees with cryptographically secured, non-custodial payments powered by the [Fiber Network](https://github.com/nervosnetwork/fiber) on CKB blockchain.
+Dular is a phone-number stablecoin wallet for mobile money markets. It lets users verify a phone number, deposit from M-Pesa, receive RUSD, send RUSD to another Dular phone number, and track every payment in a mobile-first wallet UI.
 
-In markets across Africa, Southeast Asia, and Latin America, mobile money is the financial backbone. But cross-border transfers cost 6–9%, settlements take days, and users are locked into closed ecosystems. **Dular changes this** — anyone with a phone can send and receive stablecoins instantly, using just their phone number.
+The current implementation is focused on Spark Milestone 1: phone identity, M-Pesa STK deposit, testnet-backed Fiber settlement, and end-user wallet UX.
 
----
+## Current State
 
-## The Problem
+Shipped in this repo:
 
-| Mobile Money Today | Dular |
-|---|---|
-| 6–9% cross-border fees | **< 0.001% routing fees** |
-| 1–3 day settlement | **Instant** (millisecond finality) |
-| Closed, siloed networks | **Open protocol**, interoperable |
-| Custodial, operator-controlled | **Non-custodial**, you hold your keys |
-| Requires banking infrastructure | **Peer-to-peer**, no intermediaries |
-| Currency volatility | **Stablecoin-native** (RUSD) |
-| Complex crypto addresses | **Phone number identity** |
-| Smartphones required | **USSD support** for feature phones |
+- Phone number onboarding with OTP verification through Africa's Talking SMS.
+- Phone-to-Fiber identity registry with public lookup endpoint.
+- Production-style mobile wallet UI with Home, Deposit, Send, Withdraw, Activity, and Account screens.
+- M-Pesa STK Push deposit flow using Daraja.
+- Background receiver Fiber invoice generation for deposits.
+- Public testnet Fiber settlement from the Dular payer node to a separate receiver node.
+- Daraja STK status reconciliation, so deposits can complete even when callbacks are delayed or missed.
+- Unified activity feed for M-Pesa deposits/withdrawals and Dular phone-to-phone sends/receives.
+- Verification endpoints and scripts for milestone evidence.
 
----
+Not complete yet:
 
-## How It Works
+- B2C withdrawal production flow depends on valid M-Pesa initiator/security credential setup.
+- USSD interface is planned for Milestone 2.
+- Pilot-user reporting is planned for Milestone 3.
 
-Dular is built on the **Fiber Network** — a Lightning-style Layer 2 payment network for CKB blockchain. Instead of settling every transaction on-chain, Dular opens **payment channels** between peers and executes transfers off-chain in milliseconds. Only the channel open/close hits the blockchain.
+## User Flow
 
-```
-┌──────────────────┐       ┌──────────────┐       ┌──────────────────┐
-│  Sender          │  ⚡   │  Relay       │  ⚡   │  Receiver        │
-│  Phone: +254...  │──────▶│  Node        │──────▶│  Phone: +233...  │
-│  (Dular App)     │  <1s  │  (network)   │  <1s  │  (Dular App)     │
-└──────────────────┘       └──────────────┘       └──────────────────┘
-        │                                                   │
-        └──────── Off-chain stablecoin transfer ────────────┘
-                      Fee: ~$0.001
-```
+1. User verifies their M-Pesa phone number.
+2. User enters a deposit amount in KES.
+3. Dular creates a receiver-node Fiber invoice in the background.
+4. Dular sends an M-Pesa STK Push to the user's phone.
+5. After M-Pesa succeeds, Dular pays the receiver Fiber invoice with public testnet RUSD.
+6. The in-app RUSD ledger is credited only after Fiber payment success.
+7. User can send RUSD to another verified Dular phone number.
 
-### Key Technology
-- **Phone Number Identity** — Send money to phone numbers, not hex addresses. Dular maps phone numbers to Fiber pubkeys behind the scenes.
-- **Payment Channels** — Open once, transact unlimited times off-chain
-- **Multi-hop Routing** — Payments find the cheapest path through the network automatically
-- **PTLC Security** — Point Time-Locked Contracts ensure atomic, trustless transfers
-- **Stablecoin-Native** — Built specifically for UDT stablecoins — no volatile crypto exposure
-- **USSD Interface** — Feature phone support via USSD menus — no smartphone or internet required
-- **M-Pesa On/Off Ramp** — Convert between mobile money and stablecoins seamlessly
-
----
-
-## Features
-
-### Current (v0.1 — Shipped ✅)
-
-- **💸 Instant Payments** — Pay any Fiber invoice in milliseconds via the web UI
-- **📲 Invoice Generation** — Create RUSD invoices with custom amounts and descriptions
-- **📊 Wallet Dashboard** — Real-time view of channels, balances, and node connections
-- **🔗 Channel Management** — Open and fund RUSD payment channels from the UI
-- **🛡️ Non-Custodial** — Your keys stay on your machine, always
-
-### Phase 2 — In Development 🔨
-
-- **📱 Phone Number Identity** — Send to `+254712345678` instead of `02b6d4e3...`
-- **💱 M-Pesa On/Off Ramp** — Deposit KES via M-Pesa → receive RUSD. Withdraw RUSD → receive KES via M-Pesa
-- **📟 USSD Support** — `Dial *384*55#` to send/receive stablecoins from any phone (no internet needed)
-- **👥 30-User Pilot** — Structured testing with real users in Kenya and Ghana
-
-### Phase 3 — Roadmap 🗺️
-
-- **🏦 Local Stablecoins** — Launch market-specific stablecoins (KES-pegged, GHS-pegged, NGN-pegged)
-- **🌍 Multi-corridor Remittance** — Kenya ↔ Ghana, Nigeria ↔ Kenya, Uganda ↔ Tanzania
-- **🤝 Agent Network** — Cash-in/cash-out management tools for local agents
-- **📴 Offline Payments** — Queue and sync payments when connectivity is poor
-- **📊 Merchant Tools** — Payment acceptance for small businesses and market vendors
-
----
-
-## Getting Started
-
-### Prerequisites
-
-| Requirement | Details |
-|-------------|---------|
-| **FNN binary** | Download from [Fiber releases](https://github.com/nervosnetwork/fiber/releases) |
-| **Node.js** | v18.0+ |
-| **Testnet CKB** | ≥561 CKB for channel reserves ([faucet](https://faucet.nervos.org)) |
-| **Testnet RUSD** | ≥20 RUSD for channel funding ([faucet](https://testnet0815.stablepp.xyz/faucet)) |
-
-### Quick Start
-
-```bash
-git clone https://github.com/duongja/Dular.git
-cd Dular
-npm install
-npm run migrate
-npm run dev:api
-npm run dev -- --host
-```
-
-Open **http://localhost:5173** — Dular connects to your local Fiber node automatically.
-
-Copy `.env.example` to `.env` first and set `DATABASE_URL`. Keep `DEMO_MODE=true` for local OTP and M-Pesa provider mocks.
-
----
-
-## Full Setup Guide
-
-### 1. Set Up Your Fiber Node
-
-```bash
-mkdir -p my-node/ckb
-cp config/testnet/config.yml my-node/
-cp fnn my-node/
-openssl rand -hex 32 > my-node/ckb/key
-```
-
-Start the node:
-
-```bash
-cd my-node
-FIBER_SECRET_KEY_PASSWORD='your_password' RUST_LOG=info ./fnn -c config.yml -d .
-```
-
-### 2. Fund Your Wallet
-
-Get your CKB address from node info:
-
-```bash
-curl -s -H 'content-type: application/json' \
-  -d '{"id":1,"jsonrpc":"2.0","method":"node_info","params":[]}' \
-  http://127.0.0.1:8227
-```
-
-Fund from testnet faucets:
-- **CKB:** https://faucet.nervos.org (≥561 CKB)
-- **RUSD:** https://testnet0815.stablepp.xyz/faucet (≥20 RUSD)
-
-### 3. Connect to the Network
-
-```bash
-curl -s -H 'content-type: application/json' \
-  -d '{"id":1,"jsonrpc":"2.0","method":"connect_peer","params":[{"pubkey":"02b6d4e3ab86a2ca2fad6fae0ecb2e1e559e0b911939872a90abdda6d20302be71"}]}' \
-  http://127.0.0.1:8227
-```
-
-### 4. Open a Payment Channel (via Dular UI)
-
-- Navigate to **Dashboard** → **Open RUSD Channel**
-- **Peer Pubkey:** `02b6d4e3ab86a2ca2fad6fae0ecb2e1e559e0b911939872a90abdda6d20302be71`
-- **Funding Amount:** `2000000000` (= 20 RUSD)
-- Wait for `ChannelReady` status
-
-### 5. Send Your First Payment
-
-Generate an invoice on a remote node and paste the `fibt1...` string into the **Send** tab. Click **Pay Invoice** — payment settles in under a second.
-
----
+Technical proof is hidden under "Proof details" in the UI so the product feels end-user facing while still exposing payment hashes and checkout IDs for verification.
 
 ## Architecture
 
-```
-┌─────────────────────┐         ┌──────────────┐         ┌──────────────┐
-│   Dular Interface    │  proxy  │  Fiber Node  │  p2p    │  Fiber       │
-│   Web / USSD / SMS  │───────▶│  (local)     │────────▶│  Network     │
-│                     │  /rpc   │  :8227       │         │  (global)    │
-└─────────────────────┘         └──────────────┘         └──────────────┘
-         │                             │
-    ┌────┴────┐                  ┌─────┴─────┐
-    │ Phone # │                  │  M-Pesa   │
-    │ Registry│                  │  Gateway  │
-    └─────────┘                  └───────────┘
-```
+```text
+React wallet UI
+  |
+  | /api
+  v
+Express API
+  |-- PostgreSQL ledger, phone registry, sessions, transactions
+  |-- Africa's Talking SMS OTP
+  |-- Safaricom Daraja STK Push + STK query
+  |-- Fiber payer node RPC :8227
+  `-- Fiber receiver node RPC :8247
 
-### Configuration
-
-Update `vite.config.js` if your node runs on a different port:
-
-```javascript
-server: {
-  proxy: {
-    '/rpc': {
-      target: 'http://127.0.0.1:8227',
-      changeOrigin: true,
-      rewrite: (path) => path.replace(/^\/rpc/, ''),
-    },
-  },
-}
+CKB public testnet
+  `-- Fiber payment channel funding and RUSD UDT settlement
 ```
 
----
+Important distinction:
 
-## Troubleshooting
-
-| Error | Cause | Fix |
-|-------|-------|-----|
-| `Unexpected end of JSON input` | Fiber node not running | Start node with correct `FIBER_SECRET_KEY_PASSWORD` |
-| `decryption failed: aead::Error` | Wrong key password | Use original password, or wipe `ckb/key` and regenerate |
-| `Peer's feature not found` | Not connected to peer | Run `connect_peer` first, wait a few seconds |
-| `can not find enough UDT owner cells` | No RUSD in wallet | Fund from RUSD testnet faucet |
-| `Insufficient cells for funding` | Not enough CKB | Need ≥561 CKB from faucet |
-
----
+- A Fiber payment hash is an off-chain Fiber payment identifier.
+- It is not a CKB L1 transaction hash and should not be expected to appear directly on the CKB explorer.
+- CKB explorer verification applies to channel lifecycle/funding cells.
+- Multi-hop or direct Fiber route proof comes from Fiber RPC payment records such as `list_payments`.
 
 ## Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
-| Frontend | Vite 8 + React 19 |
-| Styling | Vanilla CSS (dark mode, glassmorphism) |
-| Payment Protocol | Fiber Network (PTLC-based L2) |
-| Blockchain | CKB (Nervos Network) |
-| Stablecoin | RUSD (UDT standard) |
-| On/Off Ramp | M-Pesa Daraja API (planned) |
-| Feature Phones | USSD via Africa's Talking API (planned) |
+| --- | --- |
+| Frontend | Vite + React |
+| Styling | Custom CSS, mobile-first fintech UI |
+| API | Express |
+| Database | PostgreSQL |
+| OTP SMS | Africa's Talking |
+| M-Pesa | Safaricom Daraja |
+| Payment network | Fiber Network on CKB testnet |
+| Stablecoin | RUSD UDT |
 
----
+## Setup
 
-## Contributing
-
-Dular is open source and built for communities that need it most. We welcome contributions — especially from developers in mobile money markets who understand real-world constraints.
+### 1. Install Dependencies
 
 ```bash
-git clone https://github.com/duongja/Dular.git
-cd Dular && npm install && npm run dev
+npm install
 ```
 
----
+### 2. Configure Environment
+
+Copy the sample env file:
+
+```bash
+cp .env.example .env
+```
+
+Set at minimum:
+
+```bash
+DATABASE_URL=
+SESSION_SECRET=
+PUBLIC_BASE_URL=
+FIBER_RPC_URL=http://127.0.0.1:8227
+FIBER_RECEIVER_RPC_URL=http://127.0.0.1:8247
+FIBER_RECEIVER_CKB_ADDRESS=
+```
+
+For live integrations, also set:
+
+```bash
+DEMO_MODE=false
+AT_USERNAME=
+AT_API_KEY=
+AT_SENDER_ID=
+MPESA_ENVIRONMENT=production
+MPESA_CONSUMER_KEY=
+MPESA_CONSUMER_SECRET=
+MPESA_SHORTCODE=
+MPESA_PASSKEY=
+MPESA_B2C_SHORTCODE=
+MPESA_INITIATOR_NAME=
+MPESA_SECURITY_CREDENTIAL=
+MPESA_TIMEOUT_URL=
+```
+
+Do not commit `.env`.
+
+### 3. Run Database Migrations
+
+```bash
+npm run migrate
+```
+
+### 4. Start Fiber Nodes
+
+The Milestone 1 deposit flow uses two local Fiber nodes:
+
+- Payer node: `http://127.0.0.1:8227`
+- Receiver node: `http://127.0.0.1:8247`
+
+Create/configure the receiver node:
+
+```bash
+npm run fiber:setup:receiver
+```
+
+Start each node in a separate terminal:
+
+```bash
+export FIBER_SECRET_KEY_PASSWORD='your-node-password'
+npm run fiber:start:payer
+```
+
+```bash
+export FIBER_SECRET_KEY_PASSWORD='your-node-password'
+npm run fiber:start:receiver
+```
+
+Connect/open the local payer-to-receiver channel:
+
+```bash
+npm run fiber:connect-local
+npm run fiber:open-receiver
+```
+
+Check node/channel status:
+
+```bash
+npm run fiber:status
+```
+
+The payer node must have enough outbound RUSD liquidity for deposits. If a user deposits 10 KES and the channel only has 9 RUSD outbound, M-Pesa can succeed while Fiber settlement becomes `ActionRequired`.
+
+### 5. Start API and Frontend
+
+```bash
+npm run dev:api
+```
+
+```bash
+npm run dev -- --host 0.0.0.0
+```
+
+Open:
+
+```text
+http://localhost:5173
+```
+
+## Main Scripts
+
+| Script | Purpose |
+| --- | --- |
+| `npm run dev` | Start Vite frontend |
+| `npm run dev:api` | Start Express API |
+| `npm run migrate` | Apply PostgreSQL schema |
+| `npm run fiber:status` | Inspect payer/receiver Fiber nodes |
+| `npm run fiber:connect-local` | Connect payer node to receiver node |
+| `npm run fiber:open-receiver` | Open payer-to-receiver RUSD channel |
+| `npm run fiber:receiver-invoice` | Create receiver invoice from CLI |
+| `npm run fiber:pay` | Pay a Fiber invoice from CLI |
+| `npm run check:daraja` | Verify Daraja token credentials |
+| `npm run check:stk-status -- <CheckoutRequestID>` | Query STK status |
+| `npm run lint` | Run ESLint |
+| `npm run build` | Build frontend |
+
+## API Overview
+
+Important endpoints:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/auth/request-otp` | Send OTP to phone |
+| `POST /api/auth/verify-otp` | Verify OTP and create session |
+| `GET /api/me` | Current user and RUSD balance |
+| `GET /api/registry/lookup?phone=...` | Phone-to-Fiber identity lookup |
+| `POST /api/fiber/receiver/invoice` | Create receiver-node Fiber invoice |
+| `POST /api/mpesa/deposit` | Start M-Pesa STK deposit |
+| `POST /api/mpesa/deposits/:id/reconcile` | Query Daraja and retry settlement |
+| `POST /api/payments/send-phone` | Send RUSD to another Dular phone |
+| `GET /api/transactions` | Unified activity feed |
+| `GET /api/verification/deposit/:checkoutRequestId` | Public milestone verification data |
+
+## Verification
+
+Milestone verification artifacts are under:
+
+```text
+verification/milestone-1/
+```
+
+Useful checks:
+
+```bash
+curl http://localhost:8787/api/verification/deposit/<CheckoutRequestID>
+npm run check:stk-status -- <CheckoutRequestID>
+npm run fiber:status
+```
+
+The verification endpoint shows:
+
+- M-Pesa checkout/request IDs.
+- Deposit status and receipt when available.
+- Receiver Fiber invoice.
+- Fiber payment hash/status when settlement succeeds.
+- Fiber route data when available.
+
+## Troubleshooting
+
+| Problem | Likely Cause | Fix |
+| --- | --- | --- |
+| Deposit stuck at `Action needed` | M-Pesa succeeded but Fiber settlement could not complete | Add/rebalance outbound RUSD liquidity, then retry settlement |
+| `Receiver Fiber invoice payment hash is required` | Old API response shape or stale server | Restart API after pulling latest code |
+| Activity missing phone sends | Old API server still running | Restart API so unified feed is active |
+| STK accepted but balance not updated | Daraja callback did not reach API | Reconciliation polls STK query; keep app open or call `/reconcile` |
+| `Fiber payment ... not found after send timeout` | Fiber node did not record the invoice payment | Check channel liquidity and payer node `list_payments` |
+| `Insufficient RUSD balance` | User ledger balance is too low | Deposit or credit test balance before sending/withdrawing |
+| SMS not received | Sender ID/route/account issue | Check Africa's Talking dashboard and SMS status |
+
+## Security Notes
+
+- Never commit `.env`.
+- Do not put GitHub tokens, Daraja credentials, Africa's Talking keys, or Fiber passwords in Git remotes or source files.
+- Fiber node start scripts require `FIBER_SECRET_KEY_PASSWORD` from the shell environment.
+- `DEMO_MODE=true` is intended only for local mock development.
 
 ## License
 
@@ -231,4 +266,4 @@ MIT
 
 ---
 
-*Dular: Instant stablecoin payments for mobile money markets — no banks, no borders, no middlemen. Just your phone number.*
+Dular: instant stablecoin payments for mobile money markets, no banks, no borders, no middlemen. Just your phone number.
