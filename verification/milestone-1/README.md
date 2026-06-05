@@ -41,12 +41,14 @@ The registry lookup response is database-backed and includes the registered phon
 
 ## Screenshot Evidence
 
-Sanitized screenshots are stored in [`screenshots/`](./screenshots/). They are intentionally redacted before being committed to the public repo.
+Screenshots are stored in [`screenshots/`](./screenshots/). Both original and redacted copies are included.
 
-| File | What it shows | Redactions |
+| File | What it shows | Notes |
 | --- | --- | --- |
-| [`otp-delivery-nexuspay-redacted.jpg`](./screenshots/otp-delivery-nexuspay-redacted.jpg) | Africa's Talking/NEXUSPAY SMS sender delivering Dular OTP messages for phone verification. | OTP values are redacted because they are authentication secrets. |
-| [`mpesa-stk-nexuspay-redacted.jpg`](./screenshots/mpesa-stk-nexuspay-redacted.jpg) | Live M-Pesa confirmation messages for KES 1 payments sent to NEXUSPAY/Dular. | Transaction IDs, full Dular account reference, balances, daily limits, URLs, and Fuliza details are redacted. |
+| [`raw/otp-delivery-nexuspay-original.jpeg`](./screenshots/raw/otp-delivery-nexuspay-original.jpeg) | Africa's Talking/NEXUSPAY SMS sender delivering Dular OTP messages for phone verification. | Original WhatsApp screenshot, no redaction. |
+| [`raw/mpesa-stk-nexuspay-original.jpeg`](./screenshots/raw/mpesa-stk-nexuspay-original.jpeg) | Live M-Pesa confirmation messages for KES 1 payments sent to NEXUSPAY/Dular. | Original WhatsApp screenshot, no redaction. |
+| [`otp-delivery-nexuspay-redacted.jpg`](./screenshots/otp-delivery-nexuspay-redacted.jpg) | Africa's Talking/NEXUSPAY SMS sender delivering Dular OTP messages for phone verification. | Public-safe copy with OTP values redacted. |
+| [`mpesa-stk-nexuspay-redacted.jpg`](./screenshots/mpesa-stk-nexuspay-redacted.jpg) | Live M-Pesa confirmation messages for KES 1 payments sent to NEXUSPAY/Dular. | Public-safe copy with transaction IDs, account reference, balances, daily limits, URLs, and Fuliza details redacted. |
 
 ## Evidence To Attach At Milestone Submission
 
