@@ -3,7 +3,7 @@ import { ensureLedgerAccount } from './services/ledger.js'
 import { normalizePhone } from './utils.js'
 
 const rawPhone = process.argv[2]
-const fiberPubkey = String(process.argv[3] || process.env.REGISTRY_DEFAULT_FIBER_PUBKEY || '').trim()
+const fiberPubkey = String(process.argv[3] || '').trim()
 
 if (!rawPhone || !fiberPubkey) {
   console.error('Usage: npm run registry:seed -- <phone> <fiber_pubkey>')

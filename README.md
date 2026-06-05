@@ -132,15 +132,13 @@ DATABASE_URL=
 SESSION_SECRET=
 PUBLIC_BASE_URL=https://<your-vercel-domain>
 DEMO_MODE=false
-REGISTRY_DEFAULT_FIBER_PUBKEY=
-REGISTRY_DEMO_PHONE=+254700000001
 ```
 
 For the public lookup proof, seed at least one reviewer-safe phone record after migrations:
 
 ```bash
 npm run migrate
-npm run registry:seed -- +254700000001 <fiber_pubkey>
+npm run registry:seed -- +254700000001 <actual_fiber_pubkey>
 ```
 
 Reviewer check:

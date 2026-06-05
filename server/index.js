@@ -48,6 +48,12 @@ function mergePayload(key, payload) {
   })
 }
 
+function publicApiUrl(pathname) {
+  const base = config.publicBaseUrl.replace(/\/+$/, '')
+  const path = pathname.startsWith('/') ? pathname : `/${pathname}`
+  return `${base}${path}`
+}
+
 async function settlePaidDeposit(client, tx, { receipt, checkoutRequestId, providerPayload, providerKey = 'stkResult' }) {
   const updated = await client.query(
     `UPDATE mpesa_transactions
@@ -132,7 +138,6 @@ app.get('/api', (_req, res) => {
       registryLookup: '/api/registry/lookup?phone=+254700000001',
       verificationDeposit: '/api/verification/deposit/:checkoutRequestId',
     },
-    demoPhone: config.registryDemoPhone || undefined,
   })
 })
 
@@ -176,8 +181,8 @@ app.post('/api/auth/verify-otp', asyncHandler(async (req, res) => {
     if (row.code_hash !== hashOtp(phone, code)) throw new Error('Invalid verification code')
     await client.query('UPDATE otp_requests SET consumed_at = now() WHERE id = $1', [row.id])
 
-    let fiberPubkey = config.registryDefaultFiberPubkey || null
-    if (!fiberPubkey && config.fiberRpcConfigured) {
+    let fiberPubkey = null
+    if (config.fiberRpcConfigured) {
       try {
         fiberPubkey = await getNodePubkey()
       } catch {
@@ -226,14 +231,13 @@ app.get('/api/registry/lookup', asyncHandler(async (req, res) => {
     [phone],
   )
   if (!result.rows[0]) return res.status(404).json({ error: 'Phone number is not registered' })
-  const fiberPubkey = result.rows[0].fiber_pubkey || config.registryDefaultFiberPubkey || null
   res.json({
     phone: result.rows[0].phone,
-    fiberPubkey,
+    fiberPubkey: result.rows[0].fiber_pubkey,
     verifiedAt: result.rows[0].verified_at,
     lookupProof: {
-      source: result.rows[0].fiber_pubkey ? 'registered-user' : 'configured-default',
-      publicEndpoint: `${config.publicBaseUrl}/api/registry/lookup?phone=${encodeURIComponent(phone)}`,
+      source: 'database',
+      publicEndpoint: publicApiUrl(`/api/registry/lookup?phone=${encodeURIComponent(phone)}`),
     },
   })
 }))
