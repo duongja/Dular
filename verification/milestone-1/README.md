@@ -22,6 +22,32 @@ For local development, keep `DEMO_MODE=true`. OTP responses include `demoCode: "
 - `POST /api/mpesa/withdraw` starts a B2C withdrawal and debits the ledger.
 - `POST /api/payments/send-phone` sends RUSD between verified local phone identities.
 
+## Public API
+
+The hosted reviewer API is:
+
+```text
+https://dular.vercel.app/api
+```
+
+Useful public checks:
+
+```bash
+curl https://dular.vercel.app/api/health
+curl "https://dular.vercel.app/api/registry/lookup?phone=%2B254718948041"
+```
+
+The registry lookup response is database-backed and includes the registered phone, Fiber pubkey, verification timestamp, and the public proof URL.
+
+## Screenshot Evidence
+
+Sanitized screenshots are stored in [`screenshots/`](./screenshots/). They are intentionally redacted before being committed to the public repo.
+
+| File | What it shows | Redactions |
+| --- | --- | --- |
+| [`otp-delivery-nexuspay-redacted.jpg`](./screenshots/otp-delivery-nexuspay-redacted.jpg) | Africa's Talking/NEXUSPAY SMS sender delivering Dular OTP messages for phone verification. | OTP values are redacted because they are authentication secrets. |
+| [`mpesa-stk-nexuspay-redacted.jpg`](./screenshots/mpesa-stk-nexuspay-redacted.jpg) | Live M-Pesa confirmation messages for KES 1 payments sent to NEXUSPAY/Dular. | Transaction IDs, full Dular account reference, balances, daily limits, URLs, and Fuliza details are redacted. |
+
 ## Evidence To Attach At Milestone Submission
 
 - Screen recording of OTP registration and registry lookup.
