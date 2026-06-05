@@ -1,5 +1,7 @@
 import express from 'express'
 import cors from 'cors'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { config } from './config.js'
 import { query, withTransaction } from './db.js'
 import { requireAuth } from './auth.js'
@@ -121,6 +123,19 @@ app.get('/api/health', asyncHandler(async (_req, res) => {
   res.json({ ok: true, mode: config.demoMode ? 'demo' : 'production', dbTime: db.rows[0].now })
 }))
 
+app.get('/api', (_req, res) => {
+  res.json({
+    name: 'Dular Milestone 1 API',
+    status: 'online',
+    endpoints: {
+      health: '/api/health',
+      registryLookup: '/api/registry/lookup?phone=+254700000001',
+      verificationDeposit: '/api/verification/deposit/:checkoutRequestId',
+    },
+    demoPhone: config.registryDemoPhone || undefined,
+  })
+})
+
 app.post('/api/auth/request-otp', asyncHandler(async (req, res) => {
   const phone = normalizePhone(req.body.phone)
   const code = createOtp()
@@ -161,11 +176,13 @@ app.post('/api/auth/verify-otp', asyncHandler(async (req, res) => {
     if (row.code_hash !== hashOtp(phone, code)) throw new Error('Invalid verification code')
     await client.query('UPDATE otp_requests SET consumed_at = now() WHERE id = $1', [row.id])
 
-    let fiberPubkey
-    try {
-      fiberPubkey = await getNodePubkey()
-    } catch {
-      fiberPubkey = null
+    let fiberPubkey = config.registryDefaultFiberPubkey || null
+    if (!fiberPubkey && config.fiberRpcConfigured) {
+      try {
+        fiberPubkey = await getNodePubkey()
+      } catch {
+        fiberPubkey = null
+      }
     }
 
     const user = await client.query(
@@ -209,10 +226,15 @@ app.get('/api/registry/lookup', asyncHandler(async (req, res) => {
     [phone],
   )
   if (!result.rows[0]) return res.status(404).json({ error: 'Phone number is not registered' })
+  const fiberPubkey = result.rows[0].fiber_pubkey || config.registryDefaultFiberPubkey || null
   res.json({
     phone: result.rows[0].phone,
-    fiberPubkey: result.rows[0].fiber_pubkey,
+    fiberPubkey,
     verifiedAt: result.rows[0].verified_at,
+    lookupProof: {
+      source: result.rows[0].fiber_pubkey ? 'registered-user' : 'configured-default',
+      publicEndpoint: `${config.publicBaseUrl}/api/registry/lookup?phone=${encodeURIComponent(phone)}`,
+    },
   })
 }))
 
@@ -620,6 +642,13 @@ app.use((error, _req, res, next) => {
   res.status(400).json({ error: error.message || 'Request failed' })
 })
 
-app.listen(config.port, () => {
-  console.log(`Dular API listening on http://localhost:${config.port}`)
-})
+const modulePath = fileURLToPath(import.meta.url)
+const executedPath = process.argv[1] ? path.resolve(process.argv[1]) : ''
+
+if (executedPath === modulePath) {
+  app.listen(config.port, () => {
+    console.log(`Dular API listening on http://localhost:${config.port}`)
+  })
+}
+
+export default app

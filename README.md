@@ -121,6 +121,36 @@ MPESA_TIMEOUT_URL=
 
 Do not commit `.env`.
 
+### Vercel API Deployment
+
+The backend can be deployed to Vercel as a public Milestone 1 API. Vercel runs the Express app through `api/index.js`, while local development still uses `npm run dev:api`.
+
+Set these Vercel environment variables first:
+
+```bash
+DATABASE_URL=
+SESSION_SECRET=
+PUBLIC_BASE_URL=https://<your-vercel-domain>
+DEMO_MODE=false
+REGISTRY_DEFAULT_FIBER_PUBKEY=
+REGISTRY_DEMO_PHONE=+254700000001
+```
+
+For the public lookup proof, seed at least one reviewer-safe phone record after migrations:
+
+```bash
+npm run migrate
+npm run registry:seed -- +254700000001 <fiber_pubkey>
+```
+
+Reviewer check:
+
+```bash
+curl "https://<your-vercel-domain>/api/registry/lookup?phone=%2B254700000001"
+```
+
+Expected response includes `phone`, `fiberPubkey`, `verifiedAt`, and `lookupProof.publicEndpoint`.
+
 ### 3. Run Database Migrations
 
 ```bash

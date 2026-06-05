@@ -17,6 +17,7 @@
     "check:daraja": "node server/check-daraja-token.js",
     "check:mpesa-status": "node server/check-mpesa-status.js",
     "check:stk-status": "node server/check-stk-status.js",
+    "registry:seed": "node server/seed-registry.js",
     "migrate": "node server/migrate.js",
     "build": "vite build",
     "lint": "eslint .",

@@ -4,9 +4,13 @@ export const config = {
   port: Number(process.env.API_PORT || 8787),
   databaseUrl: process.env.DATABASE_URL || '',
   sessionSecret: process.env.SESSION_SECRET || 'dev-session-secret-change-me',
+  fiberRpcConfigured: Boolean(process.env.FIBER_RPC_URL),
+  fiberReceiverRpcConfigured: Boolean(process.env.FIBER_RECEIVER_RPC_URL),
   fiberRpcUrl: process.env.FIBER_RPC_URL || 'http://127.0.0.1:8227',
   fiberReceiverRpcUrl: process.env.FIBER_RECEIVER_RPC_URL || 'http://127.0.0.1:8247',
   fiberReceiverCkbAddress: process.env.FIBER_RECEIVER_CKB_ADDRESS || '',
+  registryDefaultFiberPubkey: process.env.REGISTRY_DEFAULT_FIBER_PUBKEY || '',
+  registryDemoPhone: process.env.REGISTRY_DEMO_PHONE || '',
   publicBaseUrl: process.env.PUBLIC_BASE_URL || 'http://localhost:8787',
   demoMode: process.env.DEMO_MODE !== 'false',
   mpesa: {
