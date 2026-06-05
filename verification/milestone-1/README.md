@@ -2,6 +2,10 @@
 
 This folder documents the Phone Identity + M-Pesa ramp implementation.
 
+## Report
+
+The full Milestone 1 verification report is available at [`report.md`](./report.md).
+
 ## Local Setup
 
 1. Create `.env` from `.env.example`.
