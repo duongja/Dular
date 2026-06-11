@@ -105,6 +105,37 @@ CREATE TABLE IF NOT EXISTS mpesa_callbacks (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS ussd_sessions (
+  session_id TEXT PRIMARY KEY,
+  phone TEXT NOT NULL,
+  service_code TEXT,
+  network_code TEXT,
+  latest_text TEXT NOT NULL DEFAULT '',
+  state JSONB NOT NULL DEFAULT '{}'::jsonb,
+  ended_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS ussd_pins (
+  phone TEXT PRIMARY KEY,
+  pin_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS ussd_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  service_code TEXT,
+  network_code TEXT,
+  input_text TEXT NOT NULL DEFAULT '',
+  response_prefix TEXT NOT NULL CHECK (response_prefix IN ('CON', 'END')),
+  response_body TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 ALTER TABLE mpesa_transactions ADD COLUMN IF NOT EXISTS fiber_invoice TEXT;
 ALTER TABLE mpesa_transactions ADD COLUMN IF NOT EXISTS fiber_payment_hash TEXT;
 ALTER TABLE mpesa_transactions ADD COLUMN IF NOT EXISTS fiber_status TEXT;
@@ -125,3 +156,6 @@ CREATE INDEX IF NOT EXISTS idx_ledger_user_created ON ledger_entries(user_id, cr
 CREATE INDEX IF NOT EXISTS idx_mpesa_user_created ON mpesa_transactions(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mpesa_callbacks_created ON mpesa_callbacks(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mpesa_callbacks_conversation ON mpesa_callbacks(conversation_id, originator_conversation_id);
+CREATE INDEX IF NOT EXISTS idx_ussd_sessions_phone_updated ON ussd_sessions(phone, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ussd_logs_session_created ON ussd_logs(session_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ussd_logs_phone_created ON ussd_logs(phone, created_at DESC);

@@ -27,6 +27,11 @@ export const config = {
     apiKey: process.env.AT_API_KEY || '',
     senderId: process.env.AT_SENDER_ID || '',
   },
+  ussd: {
+    enabled: process.env.USSD_ENABLED !== 'false',
+    withdrawalsEnabled: process.env.USSD_WITHDRAWALS_ENABLED === 'true',
+    serviceCode: process.env.USSD_SERVICE_CODE || '*483*XXXX#',
+  },
 }
 
 export function requireDatabaseUrl() {

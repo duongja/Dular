@@ -117,6 +117,9 @@ MPESA_B2C_SHORTCODE=
 MPESA_INITIATOR_NAME=
 MPESA_SECURITY_CREDENTIAL=
 MPESA_TIMEOUT_URL=
+USSD_ENABLED=true
+USSD_WITHDRAWALS_ENABLED=false
+USSD_SERVICE_CODE=*483*XXXX#
 ```
 
 Do not commit `.env`.
@@ -244,6 +247,7 @@ Important endpoints:
 | `POST /api/payments/send-phone` | Send RUSD to another Dular phone |
 | `GET /api/transactions` | Unified activity feed |
 | `GET /api/verification/deposit/:checkoutRequestId` | Public milestone verification data |
+| `POST /api/ussd` | Africa's Talking USSD simulator callback |
 
 ## Verification
 
