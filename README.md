@@ -2,7 +2,10 @@
 
 Dular is a phone-number stablecoin wallet for mobile money markets. It lets users verify a phone number, deposit from M-Pesa, receive RUSD, send RUSD to another Dular phone number, and track every payment in a mobile-first wallet UI.
 
-The current implementation is focused on Spark Milestone 1: phone identity, M-Pesa STK deposit, testnet-backed Fiber settlement, and end-user wallet UX.
+The current implementation now has two parallel paths:
+
+- Managed wallet: phone identity, M-Pesa STK deposit, testnet-backed Fiber settlement, and the original end-user wallet UX.
+- Self-custody beta: mobile-browser Fiber WASM wallet with device-held keys, browser node startup, and direct Fiber invoice send/receive.
 
 ## Current State
 
@@ -11,6 +14,7 @@ Shipped in this repo:
 - Phone number onboarding with OTP verification through Africa's Talking SMS.
 - Phone-to-Fiber identity registry with public lookup endpoint.
 - Production-style mobile wallet UI with Home, Deposit, Send, Withdraw, Activity, and Account screens.
+- Parallel self-custody beta path with browser Fiber node startup and device-held keys.
 - M-Pesa STK Push deposit flow using Daraja.
 - Background receiver Fiber invoice generation for deposits.
 - Public testnet Fiber settlement from the Dular payer node to a separate receiver node.
@@ -21,7 +25,9 @@ Shipped in this repo:
 Not complete yet:
 
 - B2C withdrawal production flow depends on valid M-Pesa initiator/security credential setup.
-- USSD interface is planned for Milestone 2.
+- USSD interface exists in simulator-tested form but is not the chosen live testing path.
+- The self-custody beta does not yet include in-app channel funding/rebalancing.
+- M-Pesa deposit -> browser invoice settlement is still follow-up work.
 - Pilot-user reporting is planned for Milestone 3.
 
 ## User Flow
@@ -241,6 +247,7 @@ Important endpoints:
 | `POST /api/auth/verify-otp` | Verify OTP and create session |
 | `GET /api/me` | Current user and RUSD balance |
 | `GET /api/registry/lookup?phone=...` | Phone-to-Fiber identity lookup |
+| `POST /api/fiber/register-device` | Register a browser/device Fiber pubkey after OTP verification |
 | `POST /api/fiber/receiver/invoice` | Create receiver-node Fiber invoice |
 | `POST /api/mpesa/deposit` | Start M-Pesa STK deposit |
 | `POST /api/mpesa/deposits/:id/reconcile` | Query Daraja and retry settlement |

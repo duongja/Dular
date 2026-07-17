@@ -1,13 +1,33 @@
 import express from 'express'
 import cors from 'cors'
+import crypto from 'node:crypto'
+import net from 'node:net'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createServer } from 'node:http'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { promises as fs } from 'node:fs'
+import { WebSocketServer } from 'ws'
 import { config } from './config.js'
 import { query, withTransaction } from './db.js'
 import { requireAuth } from './auth.js'
 import { sendOtpSms } from './services/africasTalking.js'
 import { initiateB2c, initiateStkPush, queryStkPushStatus } from './services/daraja.js'
-import { createReceiverInvoice, getNodePubkey, getReceiverNodeInfo } from './services/fiber.js'
+import {
+  abandonFiberChannel,
+  createReceiverInvoice,
+  getNodeInfo,
+  getNodePubkey,
+  getReceiverNodeInfo,
+  listChannelsByPeer,
+  listFiberPeers,
+  openFundedRUsdChannel,
+  parseFiberInvoice,
+  sendFiberPayment,
+  updateFiberChannel,
+} from './services/fiber.js'
 import { credit, debit, ensureLedgerAccount } from './services/ledger.js'
 import { createFiberBackedDepositSettlement } from './services/settlement.js'
 import { handleUssdRequest } from './services/ussd.js'
@@ -24,8 +44,15 @@ import {
 } from './utils.js'
 
 const app = express()
+const execFileAsync = promisify(execFile)
 
 app.use(cors())
+app.use((_req, res, next) => {
+  // Fiber WASM requires SharedArrayBuffer, which needs cross-origin isolation.
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
+  res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp')
+  next()
+})
 app.use(express.json({ limit: '1mb' }))
 app.use(express.urlencoded({ extended: false }))
 
@@ -54,6 +81,274 @@ function publicApiUrl(pathname) {
   const base = config.publicBaseUrl.replace(/\/+$/, '')
   const path = pathname.startsWith('/') ? pathname : `/${pathname}`
   return `${base}${path}`
+}
+
+function browserPeerMultiaddr(req) {
+  const host = req.get('x-forwarded-host') || req.get('host') || 'localhost'
+  const hostname = host.split(':')[0]
+  const isIpv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)
+  return `${isIpv4 ? `/ip4/${hostname}` : `/dns4/${hostname}`}/tcp/${config.port}/ws`
+}
+
+function channelStateName(channel) {
+  return channel?.state?.state_name || channel?.state_name || ''
+}
+
+function channelLocalBalance(channel) {
+  return BigInt(channel?.local_balance || channel?.localBalance || '0x0')
+}
+
+function channelFeeRate(channel) {
+  return BigInt(channel?.tlc_fee_proportional_millionths || '0x0')
+}
+
+function isZeroFeeChannel(channel) {
+  return channelFeeRate(channel) === 0n
+}
+
+function isPublicChannel(channel) {
+  return channel?.is_public === true || channel?.public === true
+}
+
+function readyRoutableBrowserChannels(channels) {
+  return (channels || [])
+    .filter((channel) => channelStateName(channel) === 'ChannelReady')
+    .filter(isZeroFeeChannel)
+    .filter(isPublicChannel)
+}
+
+function invoiceAttrValue(invoice, snakeKey, camelKey) {
+  const attrs = invoice?.data?.attrs || []
+  for (const attr of attrs) {
+    if (Object.prototype.hasOwnProperty.call(attr, snakeKey)) return attr[snakeKey]
+    if (Object.prototype.hasOwnProperty.call(attr, camelKey)) return attr[camelKey]
+  }
+  return null
+}
+
+function invoicePayeePubkey(parsed) {
+  return String(invoiceAttrValue(parsed?.invoice, 'payee_public_key', 'PayeePublicKey') || '').trim().toLowerCase()
+}
+
+function invoiceAmount(parsed) {
+  return BigInt(parsed?.invoice?.amount || '0x0')
+}
+
+function invoiceAllowsHopHints(parsed) {
+  const attrs = parsed?.invoice?.data?.attrs || []
+  return attrs.some((attr) => {
+    const feature = attr.feature || attr.Feature
+    if (!feature) return false
+    const values = Array.isArray(feature) ? feature : [feature]
+    return values.some((value) => String(value).includes('TRAMPOLINE_ROUTING'))
+  })
+}
+
+function hopHintForChannel(operatorPubkey, channel) {
+  if (!channel?.channel_outpoint) return null
+  return {
+    pubkey: operatorPubkey,
+    channel_outpoint: channel.channel_outpoint,
+    fee_rate: channel.tlc_fee_proportional_millionths || '0x0',
+    tlc_expiry_delta: channel.tlc_expiry_delta || '0xdbba00',
+  }
+}
+
+function forwardingFeeBaseUnits(amountBaseUnits, channel) {
+  const feeRate = channelFeeRate(channel)
+  if (feeRate === 0n) return 0n
+  return (amountBaseUnits * feeRate) / 1_000_000n
+}
+
+async function ensureZeroFeeBrowserRoute(channel) {
+  if (!channel) return channel
+  if (channel.tlc_fee_proportional_millionths !== '0x0') {
+    try {
+      await updateFiberChannel({
+        channelId: channel.channel_id,
+        tlcFeeProportionalMillionths: '0x0',
+      })
+    } catch {
+      return channel
+    }
+  }
+  return {
+    ...channel,
+    tlc_fee_proportional_millionths: '0x0',
+  }
+}
+
+async function waitForOutboundLiquidity(pubkey, requiredAmount, { timeoutMs = 30000, pollMs = 2000, requireZeroFee = true } = {}) {
+  const start = Date.now()
+  let latest = { channels: [] }
+  while (Date.now() - start < timeoutMs) {
+    latest = await listChannelsByPeer(pubkey)
+    const readyChannels = requireZeroFee
+      ? readyRoutableBrowserChannels(latest.channels || [])
+      : (latest.channels || []).filter((channel) => channelStateName(channel) === 'ChannelReady')
+    const outboundLiquidity = readyChannels.reduce((total, channel) => total + channelLocalBalance(channel), 0n)
+    const ready = readyChannels.find((channel) => channelLocalBalance(channel) >= requiredAmount) || readyChannels[0] || null
+    if (outboundLiquidity >= requiredAmount) {
+      return { ready, readyChannels, outboundLiquidity, channels: latest.channels || [] }
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs))
+  }
+  const readyChannels = requireZeroFee
+    ? readyRoutableBrowserChannels(latest.channels || [])
+    : (latest.channels || []).filter((channel) => channelStateName(channel) === 'ChannelReady')
+  const outboundLiquidity = readyChannels.reduce((total, channel) => total + channelLocalBalance(channel), 0n)
+  return {
+    ready: null,
+    readyChannels,
+    outboundLiquidity,
+    channels: latest.channels || [],
+  }
+}
+
+async function prepareBrowserOutboundChannel({ pubkey, fundingAmountBaseUnits, replacePending = false }) {
+  const peers = await listFiberPeers()
+  const connectedPeer = peers.peers?.find((peer) => peer.pubkey.toLowerCase() === pubkey)
+  if (!connectedPeer) {
+    throw new Error('Browser wallet is not connected to the Dular operator node yet. Keep the receiver wallet open and refresh network.')
+  }
+
+  let existing = await listChannelsByPeer(pubkey)
+  let readyChannels = readyRoutableBrowserChannels(existing.channels || [])
+  let outboundLiquidity = readyChannels.reduce((total, channel) => total + channelLocalBalance(channel), 0n)
+  let pendingChannels = (existing.channels || []).filter((channel) => channelStateName(channel) !== 'ChannelReady')
+  let existingPending = pendingChannels[0] || null
+  let readyChannel = outboundLiquidity >= fundingAmountBaseUnits
+    ? readyChannels.find((channel) => channelLocalBalance(channel) >= fundingAmountBaseUnits) || readyChannels[0] || null
+    : null
+
+  const abandonedPendingChannels = []
+  if (outboundLiquidity < fundingAmountBaseUnits && pendingChannels.length && replacePending) {
+    for (const channel of pendingChannels) {
+      await abandonFiberChannel(channel.channel_id)
+      abandonedPendingChannels.push(channel.channel_id)
+    }
+    existing = await listChannelsByPeer(pubkey)
+    readyChannels = readyRoutableBrowserChannels(existing.channels || [])
+    outboundLiquidity = readyChannels.reduce((total, channel) => total + channelLocalBalance(channel), 0n)
+    pendingChannels = (existing.channels || []).filter((channel) => channelStateName(channel) !== 'ChannelReady')
+    existingPending = pendingChannels[0] || null
+    readyChannel = outboundLiquidity >= fundingAmountBaseUnits
+      ? readyChannels.find((channel) => channelLocalBalance(channel) >= fundingAmountBaseUnits) || readyChannels[0] || null
+      : null
+  }
+
+  let channelBootstrap = null
+  if (!readyChannel && !existingPending) {
+    channelBootstrap = await openFundedRUsdChannel({
+      pubkey,
+      fundingAmountBaseUnits,
+      isPublic: true,
+    })
+  }
+
+  if (!readyChannel) {
+    const waited = await waitForOutboundLiquidity(pubkey, fundingAmountBaseUnits, { timeoutMs: 30000, pollMs: 2000, requireZeroFee: true })
+    readyChannel = waited.ready
+    outboundLiquidity = waited.outboundLiquidity
+    pendingChannels = (waited.channels || []).filter((channel) => channelStateName(channel) !== 'ChannelReady')
+    existingPending = pendingChannels[0] || null
+  }
+
+  readyChannel = await ensureZeroFeeBrowserRoute(readyChannel)
+
+  return {
+    connectedPeer,
+    abandonedPendingChannels,
+    channelBootstrap,
+    pendingChannel: existingPending || null,
+    pendingChannels,
+    readyChannel,
+    outboundLiquidity,
+    requiredOutboundLiquidity: fundingAmountBaseUnits,
+    nextAction: readyChannel ? null : (channelBootstrap || existingPending ? 'accept_channel' : 'wait_for_channel_ready'),
+  }
+}
+
+async function lockArgToAddress(lockArg) {
+  const { stdout } = await execFileAsync('ckb-cli', [
+    '--url',
+    'https://testnet.ckbapp.dev/',
+    'util',
+    'key-info',
+    '--lock-arg',
+    lockArg,
+    '--output-format',
+    'json',
+  ], { timeout: 30_000 })
+  return JSON.parse(stdout).address.testnet
+}
+
+async function capacityByLockArg(lockArg) {
+  const { stdout } = await execFileAsync('ckb-cli', [
+    '--url',
+    'https://testnet.ckbapp.dev/',
+    'wallet',
+    'get-capacity',
+    '--lock-arg',
+    lockArg,
+    '--output-format',
+    'json',
+  ], { timeout: 30_000 })
+  return JSON.parse(stdout).total
+}
+
+async function transferDevCapacity(address, capacityCkb) {
+  const password = process.env.FIBER_SECRET_KEY_PASSWORD
+  if (!password) {
+    throw new Error('FIBER_SECRET_KEY_PASSWORD is required for dev wallet funding')
+  }
+
+  const encryptedKey = await fs.readFile(path.resolve('.fiber-node-fresh/ckb/key'))
+  const salt = encryptedKey.subarray(1, 17)
+  const nonce = encryptedKey.subarray(17, 29)
+  const ciphertext = encryptedKey.subarray(29)
+
+  const derivedKey = await new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, 32, {
+      N: 1 << 17,
+      r: 8,
+      p: 1,
+      maxmem: 256 * 1024 * 1024,
+    }, (error, key) => {
+      if (error) reject(error)
+      else resolve(key)
+    })
+  })
+
+  const authTag = ciphertext.subarray(ciphertext.length - 16)
+  const payload = ciphertext.subarray(0, ciphertext.length - 16)
+  const decipher = crypto.createDecipheriv('aes-256-gcm', derivedKey, nonce)
+  decipher.setAuthTag(authTag)
+  const plaintextKey = Buffer.concat([decipher.update(payload), decipher.final()]).toString('hex')
+
+  const tempKeyPath = path.join(os.tmpdir(), `dular-funding-${Date.now()}.key`)
+  await fs.writeFile(tempKeyPath, `${plaintextKey}\n`, { mode: 0o600 })
+
+  try {
+    const { stdout } = await execFileAsync('ckb-cli', [
+      '--url',
+      'https://testnet.ckbapp.dev/',
+      'wallet',
+      'transfer',
+      '--privkey-path',
+      tempKeyPath,
+      '--to-address',
+      address,
+      '--capacity',
+      String(capacityCkb),
+      '--output-format',
+      'json',
+    ], { timeout: 60_000 })
+
+    return JSON.parse(stdout)
+  } finally {
+    await fs.rm(tempKeyPath, { force: true })
+  }
 }
 
 async function settlePaidDeposit(client, tx, { receipt, checkoutRequestId, providerPayload, providerKey = 'stkResult' }) {
@@ -139,6 +434,7 @@ app.get('/api', (_req, res) => {
       health: '/api/health',
       registryLookup: '/api/registry/lookup?phone=+254700000001',
       ussd: '/api/ussd',
+      registerDevice: '/api/fiber/register-device',
       verificationDeposit: '/api/verification/deposit/:checkoutRequestId',
     },
   })
@@ -265,6 +561,62 @@ app.get('/api/fiber/receiver', asyncHandler(async (_req, res) => {
   })
 }))
 
+app.get('/api/fiber/operator', requireAuth, asyncHandler(async (_req, res) => {
+  const operator = await getNodeInfo()
+  res.json({
+    operator,
+    wsAddress: browserPeerMultiaddr(_req),
+  })
+}))
+
+app.post('/api/fiber/register-device', requireAuth, asyncHandler(async (req, res) => {
+  const fiberPubkey = String(req.body.fiberPubkey || '').trim().toLowerCase()
+  if (!/^[0-9a-f]{66}$/.test(fiberPubkey)) {
+    throw new Error('A valid Fiber pubkey is required')
+  }
+
+  const updated = await query(
+    `UPDATE users
+     SET fiber_pubkey = $2,
+         updated_at = now()
+     WHERE id = $1
+     RETURNING *`,
+    [req.user.id, fiberPubkey],
+  )
+
+  const account = await query(
+    'SELECT balance_base_units FROM ledger_accounts WHERE user_id = $1',
+    [req.user.id],
+  )
+
+  res.json({
+    ok: true,
+    user: publicUser(updated.rows[0], account.rows[0]?.balance_base_units || '0'),
+    walletMode: 'self_custody',
+  })
+}))
+
+app.post('/api/fiber/browser/address', requireAuth, asyncHandler(async (req, res) => {
+  const lockArg = String(req.body.lockArg || '').trim().toLowerCase()
+  if (!/^0x[0-9a-f]{40}$/.test(lockArg)) {
+    throw new Error('A valid secp256k1 lock arg is required')
+  }
+  const [address, capacity] = await Promise.all([
+    lockArgToAddress(lockArg),
+    capacityByLockArg(lockArg),
+  ])
+  res.json({ ok: true, address, lockArg, capacity })
+}))
+
+app.post('/api/fiber/browser/fund-ckb', requireAuth, asyncHandler(async (req, res) => {
+  const address = String(req.body.address || '').trim()
+  const capacityCkb = Number(req.body.capacityCkb || 200)
+  if (!address) throw new Error('A target testnet address is required')
+  if (!Number.isFinite(capacityCkb) || capacityCkb <= 0) throw new Error('A positive capacity amount is required')
+  const transfer = await transferDevCapacity(address, capacityCkb)
+  res.json({ ok: true, transfer, fundedCapacityCkb: capacityCkb })
+}))
+
 app.post('/api/fiber/receiver/invoice', requireAuth, asyncHandler(async (req, res) => {
   const amountKes = Number(req.body.amountKes)
   const amountBaseUnits = toRUsdBaseUnits(amountKes)
@@ -279,6 +631,19 @@ app.post('/api/fiber/receiver/invoice', requireAuth, asyncHandler(async (req, re
     paymentHash,
     amountBaseUnits: amountBaseUnits.toString(),
     receiverRpcUrl: config.fiberReceiverRpcUrl,
+  })
+}))
+
+app.post('/api/fiber/test-invoice', requireAuth, asyncHandler(async (req, res) => {
+  const amountBaseUnits = BigInt(String(req.body.amountBaseUnits || '100000000'))
+  const description = String(req.body.description || `Dular test invoice for ${req.user.phone}`).trim()
+  const invoice = await createReceiverInvoice({ amountBaseUnits, description })
+  const paymentHash = invoice.payment_hash || invoice.invoice?.data?.payment_hash
+  res.json({
+    ok: true,
+    invoice: invoice.invoice_address,
+    paymentHash,
+    amountBaseUnits: amountBaseUnits.toString(),
   })
 }))
 
@@ -527,6 +892,150 @@ app.post('/api/mpesa/withdraw', requireAuth, asyncHandler(async (req, res) => {
   res.json({ transaction: tx, provider })
 }))
 
+app.post('/api/fiber/pay-invoice-bridge', requireAuth, asyncHandler(async (req, res) => {
+  const invoice = String(req.body.invoice || '').trim()
+  if (!invoice) throw new Error('A Fiber invoice is required')
+  const payment = await sendFiberPayment(invoice)
+  res.json({ ok: true, payment, mode: 'operator_bridge' })
+}))
+
+app.post('/api/fiber/browser/seed-liquidity', requireAuth, asyncHandler(async (req, res) => {
+  const pubkey = String(req.body.pubkey || req.user.fiber_pubkey || '').trim().toLowerCase()
+  const invoice = String(req.body.invoice || '').trim()
+  const fundingAmountBaseUnits = BigInt(String(req.body.fundingAmountBaseUnits || '100000000'))
+  const replacePending = Boolean(req.body.replacePending)
+
+  if (!/^[0-9a-f]{66}$/.test(pubkey)) throw new Error('A valid browser Fiber pubkey is required')
+  if (!invoice) throw new Error('A browser-created invoice is required')
+
+  const prepared = await prepareBrowserOutboundChannel({ pubkey, fundingAmountBaseUnits, replacePending })
+  const {
+    connectedPeer,
+    abandonedPendingChannels,
+    channelBootstrap,
+    pendingChannel,
+    pendingChannels,
+    readyChannel,
+    outboundLiquidity,
+    requiredOutboundLiquidity,
+    nextAction,
+  } = prepared
+
+  if (!readyChannel) {
+    res.json({
+      ok: true,
+      connected: true,
+      peerAddress: connectedPeer.address,
+      abandonedPendingChannels,
+      channelBootstrap,
+      pendingChannel,
+      pendingChannels,
+      readyChannel: null,
+      payment: null,
+      outboundLiquidity: outboundLiquidity.toString(),
+      requiredOutboundLiquidity: requiredOutboundLiquidity.toString(),
+      nextAction,
+    })
+    return
+  }
+
+  const payment = await sendFiberPayment(invoice)
+
+  res.json({
+    ok: true,
+    connected: true,
+    peerAddress: connectedPeer.address,
+    abandonedPendingChannels,
+    channelBootstrap,
+    pendingChannels,
+    readyChannel,
+    outboundLiquidity: outboundLiquidity.toString(),
+    requiredOutboundLiquidity: requiredOutboundLiquidity.toString(),
+    payment,
+  })
+}))
+
+app.post('/api/fiber/browser/prepare-receive-route', requireAuth, asyncHandler(async (req, res) => {
+  const pubkey = String(req.body.pubkey || req.user.fiber_pubkey || '').trim().toLowerCase()
+  const fundingAmountBaseUnits = BigInt(String(req.body.fundingAmountBaseUnits || '100000000'))
+  const replacePending = Boolean(req.body.replacePending)
+
+  if (!/^[0-9a-f]{66}$/.test(pubkey)) throw new Error('A valid browser Fiber pubkey is required')
+
+  const prepared = await prepareBrowserOutboundChannel({ pubkey, fundingAmountBaseUnits, replacePending })
+  const operator = await getNodeInfo()
+  const hopHint = prepared.readyChannel ? hopHintForChannel(operator.pubkey, prepared.readyChannel) : null
+
+  res.json({
+    ok: true,
+    mode: 'receive_route',
+    connected: true,
+    peerAddress: prepared.connectedPeer.address,
+    abandonedPendingChannels: prepared.abandonedPendingChannels,
+    channelBootstrap: prepared.channelBootstrap,
+    pendingChannel: prepared.pendingChannel,
+    pendingChannels: prepared.pendingChannels,
+    readyChannel: prepared.readyChannel,
+    outboundLiquidity: prepared.outboundLiquidity.toString(),
+    requiredOutboundLiquidity: prepared.requiredOutboundLiquidity.toString(),
+    hopHints: hopHint ? [hopHint] : [],
+    nextAction: prepared.nextAction,
+  })
+}))
+
+app.post('/api/fiber/browser/invoice-route', requireAuth, asyncHandler(async (req, res) => {
+  const invoice = String(req.body.invoice || '').trim()
+  if (!invoice) throw new Error('A Fiber invoice is required')
+
+  const parsed = await parseFiberInvoice(invoice)
+  const payeePubkey = invoicePayeePubkey(parsed)
+  const amountBaseUnits = invoiceAmount(parsed)
+  const supportsHopHints = invoiceAllowsHopHints(parsed)
+  if (!/^[0-9a-f]{66}$/.test(payeePubkey)) {
+    throw new Error('Could not read a valid payee pubkey from this invoice')
+  }
+
+  const [operator, peers, channels] = await Promise.all([
+    getNodeInfo(),
+    listFiberPeers(),
+    listChannelsByPeer(payeePubkey),
+  ])
+  const connectedPeer = peers.peers?.find((peer) => peer.pubkey.toLowerCase() === payeePubkey) || null
+  const readyChannels = readyRoutableBrowserChannels(channels.channels || [])
+  const outboundLiquidity = readyChannels.reduce((total, channel) => total + channelLocalBalance(channel), 0n)
+  let routeChannel = readyChannels.find((channel) => channelLocalBalance(channel) >= amountBaseUnits) || null
+  routeChannel = await ensureZeroFeeBrowserRoute(routeChannel)
+  const hopHint = routeChannel ? hopHintForChannel(operator.pubkey, routeChannel) : null
+  const estimatedFinalHopFeeBaseUnits = routeChannel ? forwardingFeeBaseUnits(amountBaseUnits, routeChannel) : 0n
+  const routeReady = Boolean(connectedPeer && hopHint && supportsHopHints && outboundLiquidity >= amountBaseUnits)
+  let reason = null
+  if (!supportsHopHints) {
+    reason = 'This invoice was created without hop-hint support. Ask the receiver to refresh the app, create a new invoice, then prepare the receiving route again.'
+  } else if (!connectedPeer) {
+    reason = 'Receiver browser wallet is not connected to the Dular operator. Keep the receiver wallet tab open, refresh network, then prepare the receiving route.'
+  } else if (!hopHint) {
+    reason = 'Receiver has no ready Dular operator route with enough inbound RUSD. Keep the receiver wallet open and prepare a receiving route.'
+  }
+
+  res.json({
+    ok: true,
+    operatorPubkey: operator.pubkey,
+    payeePubkey,
+    amountBaseUnits: amountBaseUnits.toString(),
+    estimatedFinalHopFeeBaseUnits: estimatedFinalHopFeeBaseUnits.toString(),
+    senderRequiredOutboundBaseUnits: (amountBaseUnits + estimatedFinalHopFeeBaseUnits).toString(),
+    supportsHopHints,
+    connected: Boolean(connectedPeer),
+    peerAddress: connectedPeer?.address || null,
+    routeReady,
+    reason,
+    outboundLiquidity: outboundLiquidity.toString(),
+    hopHints: hopHint ? [hopHint] : [],
+    routeChannel,
+    readyChannels,
+  })
+}))
+
 app.post('/api/payments/send-phone', requireAuth, asyncHandler(async (req, res) => {
   const recipientPhone = normalizePhone(req.body.phone)
   const amount = parseBaseUnits(req.body.amountBaseUnits)
@@ -658,7 +1167,48 @@ const modulePath = fileURLToPath(import.meta.url)
 const executedPath = process.argv[1] ? path.resolve(process.argv[1]) : ''
 
 if (executedPath === modulePath) {
-  app.listen(config.port, () => {
+  const server = createServer(app)
+  const wss = new WebSocketServer({ noServer: true })
+
+  wss.on('connection', (socket) => {
+    const upstream = net.connect({ host: '127.0.0.1', port: 8228 })
+
+    socket.on('message', (data, isBinary) => {
+      upstream.write(isBinary ? data : Buffer.from(data))
+    })
+
+    upstream.on('data', (chunk) => {
+      if (socket.readyState === socket.OPEN) {
+        socket.send(chunk, { binary: true })
+      }
+    })
+
+    const closeBoth = () => {
+      try {
+        socket.close()
+      } catch {
+        // ignore close races between the ws and tcp sides
+      }
+      try {
+        upstream.destroy()
+      } catch {
+        // ignore destroy races between the ws and tcp sides
+      }
+    }
+
+    socket.on('close', closeBoth)
+    socket.on('error', closeBoth)
+    upstream.on('close', closeBoth)
+    upstream.on('error', closeBoth)
+  })
+
+  server.on('upgrade', (req, socket, head) => {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req)
+    })
+  })
+
+  server.listen(config.port, () => {
     console.log(`Dular API listening on http://localhost:${config.port}`)
   })
 }

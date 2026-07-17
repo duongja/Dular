@@ -123,7 +123,7 @@ function MoneyInput({ label, value, onChange, placeholder = '100', currency = 'K
   )
 }
 
-function AuthGate({ onAuth }) {
+function AuthGate({ onAuth, onSwitchMode, onOpenChooser }) {
   const [phone, setPhone] = useState('')
   const [code, setCode] = useState('')
   const [demoCode, setDemoCode] = useState('')
@@ -178,6 +178,10 @@ function AuthGate({ onAuth }) {
         <p>
           Deposit from M-Pesa, hold RUSD, send to people by phone number, and cash out when you need local money.
         </p>
+        <div className="buttonRow wrapButtons">
+          {onSwitchMode && <button type="button" className="secondaryBtn" onClick={onSwitchMode}>Try self-custody beta</button>}
+          {onOpenChooser && <button type="button" className="ghostBtn" onClick={onOpenChooser}>Choose mode</button>}
+        </div>
       </section>
 
       <section className="authPanel">
@@ -557,7 +561,7 @@ function ProofRow({ label, value }) {
   )
 }
 
-function AccountScreen({ user, onSignOut }) {
+function AccountScreen({ user, onSignOut, onSwitchMode, onOpenChooser }) {
   const [phone, setPhone] = useState('')
   const [lookup, setLookup] = useState(null)
   const [status, setStatus] = useState(null)
@@ -581,7 +585,11 @@ function AccountScreen({ user, onSignOut }) {
         <p className="eyebrow">Your Dular account</p>
         <h1>{user.phone}</h1>
         <p>Your phone number is verified and ready for M-Pesa deposits, transfers, and withdrawals.</p>
-        <button type="button" className="secondaryBtn" onClick={onSignOut}>Sign out</button>
+        <div className="buttonRow wrapButtons">
+          <button type="button" className="secondaryBtn" onClick={onSignOut}>Sign out</button>
+          {onSwitchMode && <button type="button" className="secondaryBtn" onClick={onSwitchMode}>Open self-custody beta</button>}
+          {onOpenChooser && <button type="button" className="ghostBtn" onClick={onOpenChooser}>Choose mode</button>}
+        </div>
       </section>
 
       <section className="contentCard">
@@ -611,7 +619,7 @@ function AccountScreen({ user, onSignOut }) {
   )
 }
 
-function WalletApp({ user, onRefresh, onSignOut }) {
+function WalletApp({ user, onRefresh, onSignOut, onSwitchMode, onOpenChooser }) {
   const [tab, setTab] = useState('home')
   const [transactions, setTransactions] = useState([])
   const [syncing, setSyncing] = useState(false)
@@ -712,7 +720,7 @@ function WalletApp({ user, onRefresh, onSignOut }) {
         {tab === 'send' && <SendFlow onDone={refreshAll} />}
         {tab === 'withdraw' && <WithdrawFlow onDone={refreshAll} balanceBaseUnits={user.balanceBaseUnits} />}
         {tab === 'activity' && <ActivityScreen transactions={transactions} />}
-        {tab === 'account' && <AccountScreen user={user} onSignOut={onSignOut} />}
+        {tab === 'account' && <AccountScreen user={user} onSignOut={onSignOut} onSwitchMode={onSwitchMode} onOpenChooser={onOpenChooser} />}
       </section>
 
       <nav className="bottomNav" aria-label="Primary navigation">
@@ -727,7 +735,7 @@ function WalletApp({ user, onRefresh, onSignOut }) {
   )
 }
 
-export default function MilestoneOneApp() {
+export default function MilestoneOneApp({ onSwitchMode = null, onOpenChooser = null }) {
   const [user, setUser] = useState(null)
   const [booting, setBooting] = useState(true)
 
@@ -772,7 +780,7 @@ export default function MilestoneOneApp() {
     )
   }
 
-  if (!user) return <AuthGate onAuth={setUser} />
+  if (!user) return <AuthGate onAuth={setUser} onSwitchMode={onSwitchMode} onOpenChooser={onOpenChooser} />
 
-  return <WalletApp user={user} onRefresh={refreshUser} onSignOut={signOut} />
+  return <WalletApp user={user} onRefresh={refreshUser} onSignOut={signOut} onSwitchMode={onSwitchMode} onOpenChooser={onOpenChooser} />
 }

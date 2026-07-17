@@ -24,12 +24,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@nervosnetwork/fiber-js": "^0.9.0-rc7",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "pg": "^8.21.0",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react-dom": "^19.2.5",
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
