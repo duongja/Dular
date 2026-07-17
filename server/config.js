@@ -1,5 +1,7 @@
 import 'dotenv/config'
 
+const demoMode = process.env.DEMO_MODE !== 'false'
+
 export const config = {
   port: Number(process.env.API_PORT || 8787),
   databaseUrl: process.env.DATABASE_URL || '',
@@ -10,7 +12,8 @@ export const config = {
   fiberReceiverRpcUrl: process.env.FIBER_RECEIVER_RPC_URL || 'http://127.0.0.1:8247',
   fiberReceiverCkbAddress: process.env.FIBER_RECEIVER_CKB_ADDRESS || '',
   publicBaseUrl: process.env.PUBLIC_BASE_URL || 'http://localhost:8787',
-  demoMode: process.env.DEMO_MODE !== 'false',
+  demoMode,
+  otpDemoMode: process.env.OTP_DEMO_MODE === 'true' || demoMode,
   mpesa: {
     environment: process.env.MPESA_ENVIRONMENT || 'production',
     consumerKey: process.env.MPESA_CONSUMER_KEY || '',

@@ -39,7 +39,7 @@ export function createToken() {
 }
 
 export function createOtp() {
-  if (config.demoMode) return '123456'
+  if (config.otpDemoMode) return '123456'
   return String(crypto.randomInt(100000, 1000000))
 }
 

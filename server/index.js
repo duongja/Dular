@@ -459,7 +459,7 @@ app.post('/api/auth/request-otp', asyncHandler(async (req, res) => {
     ok: true,
     phone,
     expiresInSeconds: 600,
-    demoCode: config.demoMode ? sms.code : undefined,
+    demoCode: config.otpDemoMode ? sms.code : undefined,
   })
 }))
 

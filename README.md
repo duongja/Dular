@@ -141,7 +141,10 @@ DATABASE_URL=
 SESSION_SECRET=
 PUBLIC_BASE_URL=https://<your-vercel-domain>
 DEMO_MODE=false
+OTP_DEMO_MODE=true
 ```
+
+Use `OTP_DEMO_MODE=true` for reviewer/test deployments when Africa's Talking SMS is not live yet. This keeps the database/API live while returning the visible OTP code `123456` in the app. Set `OTP_DEMO_MODE=false` only after `AT_USERNAME`, `AT_API_KEY`, and the approved sender route are working.
 
 For the public lookup proof, seed at least one reviewer-safe phone record after migrations:
 
