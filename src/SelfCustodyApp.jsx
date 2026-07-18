@@ -1125,11 +1125,35 @@ export default function SelfCustodyApp() {
     })
     runtimeRef.current = runtime
     const info = await browserNodeInfo()
-    await registerDevice(info.pubkey)
-    const operator = await api('/fiber/operator')
-    await browserConnectPeer({ address: operator.wsAddress, pubkey: operator.operator?.pubkey, addrType: 'ws' })
-    await refreshNetwork({ silent: true })
+    const startupWarnings = []
+
+    try {
+      await registerDevice(info.pubkey)
+    } catch (error) {
+      startupWarnings.push(`Could not sync your phone registry: ${error.message || 'request failed'}`)
+    }
+
+    try {
+      const operator = await api('/fiber/operator')
+      await browserConnectPeer({ address: operator.wsAddress, pubkey: operator.operator?.pubkey, addrType: 'ws' })
+    } catch (error) {
+      startupWarnings.push(`Dular operator is not reachable: ${error.message || 'request failed'}`)
+    }
+
+    try {
+      await refreshNetwork({ silent: true })
+    } catch (error) {
+      startupWarnings.push(`Could not refresh wallet network state: ${error.message || 'request failed'}`)
+    }
+
+    if (startupWarnings.length) {
+      setNetworkStatus({
+        type: 'warning',
+        message: `Wallet opened with limited network access. ${startupWarnings.join(' ')}`,
+      })
+    }
     setWalletStatus('ready')
+    return { info, startupWarnings }
   }, [refreshNetwork, registerDevice])
 
   async function fundWallet() {
@@ -1166,8 +1190,13 @@ export default function SelfCustodyApp() {
       const nextRecord = await createWalletRecord(user.phone, pin)
       setWalletRecord(nextRecord)
       const unlocked = await unlockWalletRecord(nextRecord, pin)
-      await startWalletNode(user.phone, unlocked)
-      setSetupStatus({ type: 'success', message: 'Device wallet created and Fiber pubkey registered.' })
+      const startup = await startWalletNode(user.phone, unlocked)
+      setSetupStatus({
+        type: startup.startupWarnings.length ? 'warning' : 'success',
+        message: startup.startupWarnings.length
+          ? 'Wallet created. Some network services are not reachable yet, so payments may be limited until the operator is online.'
+          : 'Device wallet created and synced.',
+      })
     } catch (error) {
       setSetupStatus({ type: 'error', message: error.message || 'Could not create wallet.' })
       setWalletStatus('idle')
@@ -1177,12 +1206,28 @@ export default function SelfCustodyApp() {
   async function unlockWallet(pin) {
     setSetupStatus(null)
     setWalletStatus('unlocking')
+    let unlocked
     try {
-      const unlocked = await unlockWalletRecord(walletRecord, pin)
-      await startWalletNode(user.phone, unlocked)
-      setSetupStatus({ type: 'success', message: 'Device wallet unlocked.' })
+      unlocked = await unlockWalletRecord(walletRecord, pin)
     } catch (error) {
       setSetupStatus({ type: 'error', message: 'Could not unlock this wallet. Check the PIN and try again.' })
+      setWalletStatus('idle')
+      return
+    }
+
+    try {
+      const startup = await startWalletNode(user.phone, unlocked)
+      setSetupStatus({
+        type: startup.startupWarnings.length ? 'warning' : 'success',
+        message: startup.startupWarnings.length
+          ? 'PIN accepted. Wallet opened with limited network access, so payments may be limited until the operator is online.'
+          : 'Device wallet unlocked.',
+      })
+    } catch (error) {
+      setSetupStatus({
+        type: 'error',
+        message: `PIN accepted, but the browser Fiber wallet could not start: ${error.message || 'startup failed'}`,
+      })
       setWalletStatus('idle')
     }
   }
