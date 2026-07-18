@@ -563,9 +563,11 @@ app.get('/api/fiber/receiver', asyncHandler(async (_req, res) => {
 
 app.get('/api/fiber/operator', requireAuth, asyncHandler(async (_req, res) => {
   const operator = await getNodeInfo()
+  const wsAddress = config.fiberOperatorWsAddr || browserPeerMultiaddr(_req)
   res.json({
     operator,
-    wsAddress: browserPeerMultiaddr(_req),
+    wsAddress,
+    addrType: wsAddress.includes('/wss') ? 'wss' : 'ws',
   })
 }))
 

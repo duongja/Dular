@@ -11,6 +11,7 @@ export const config = {
   fiberRpcUrl: process.env.FIBER_RPC_URL || 'http://127.0.0.1:8227',
   fiberReceiverRpcUrl: process.env.FIBER_RECEIVER_RPC_URL || 'http://127.0.0.1:8247',
   fiberReceiverCkbAddress: process.env.FIBER_RECEIVER_CKB_ADDRESS || '',
+  fiberOperatorWsAddr: process.env.FIBER_OPERATOR_WS_ADDR || '',
   publicBaseUrl: process.env.PUBLIC_BASE_URL || 'http://localhost:8787',
   demoMode,
   otpDemoMode: process.env.OTP_DEMO_MODE === 'true' || demoMode,

@@ -103,6 +103,7 @@ DATABASE_URL=
 SESSION_SECRET=
 PUBLIC_BASE_URL=
 FIBER_RPC_URL=http://127.0.0.1:8227
+FIBER_OPERATOR_WS_ADDR=
 FIBER_RECEIVER_RPC_URL=http://127.0.0.1:8247
 FIBER_RECEIVER_CKB_ADDRESS=
 ```
@@ -142,9 +143,13 @@ SESSION_SECRET=
 PUBLIC_BASE_URL=https://<your-vercel-domain>
 DEMO_MODE=false
 OTP_DEMO_MODE=true
+FIBER_RPC_URL=https://<railway-fiber-domain>/rpc
+FIBER_OPERATOR_WS_ADDR=/dns4/<railway-fiber-domain>/tcp/443/wss
 ```
 
 Use `OTP_DEMO_MODE=true` for reviewer/test deployments when Africa's Talking SMS is not live yet. This keeps the database/API live while returning the visible OTP code `123456` in the app. Set `OTP_DEMO_MODE=false` only after `AT_USERNAME`, `AT_API_KEY`, and the approved sender route are working.
+
+For browser self-custody testing on Vercel, deploy the hosted Fiber operator first. See `railway/fiber/README.md`.
 
 For the public lookup proof, seed at least one reviewer-safe phone record after migrations:
 

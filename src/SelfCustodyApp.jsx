@@ -1135,7 +1135,8 @@ export default function SelfCustodyApp() {
 
     try {
       const operator = await api('/fiber/operator')
-      await browserConnectPeer({ address: operator.wsAddress, pubkey: operator.operator?.pubkey, addrType: 'ws' })
+      const addrType = operator.addrType || (operator.wsAddress?.includes('/wss') ? 'wss' : 'ws')
+      await browserConnectPeer({ address: operator.wsAddress, pubkey: operator.operator?.pubkey, addrType })
     } catch (error) {
       startupWarnings.push(`Dular operator is not reachable: ${error.message || 'request failed'}`)
     }
