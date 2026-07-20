@@ -429,9 +429,12 @@ async function cellsByLockArg(lockArg, filter = undefined) {
 }
 
 async function capacityByLockArg(lockArg) {
+  return formatCapacity(await capacityShannonsByLockArg(lockArg))
+}
+
+async function capacityShannonsByLockArg(lockArg) {
   const cells = await cellsByLockArg(lockArg)
-  const total = cells.reduce((sum, cell) => sum + BigInt(cell.output?.capacity || '0x0'), 0n)
-  return formatCapacity(total)
+  return cells.reduce((sum, cell) => sum + BigInt(cell.output?.capacity || '0x0'), 0n)
 }
 
 async function udtAmountByLockArg(lockArg, typeScript) {
@@ -738,11 +741,15 @@ app.get('/api/fiber/operator', requireAuth, asyncHandler(async (_req, res) => {
   const operator = await getNodeInfo()
   const wsAddress = config.fiberOperatorWsAddr || browserPeerMultiaddr(_req)
   const fundingLockArg = operator.default_funding_lock_script?.args || ''
+  const capacityShannons = fundingLockArg ? await capacityShannonsByLockArg(fundingLockArg) : 0n
   res.json({
     operator,
     wsAddress,
     addrType: wsAddress.includes('/wss') ? 'wss' : 'ws',
     fundingAddress: fundingLockArg ? lockArgToAddress(fundingLockArg) : '',
+    fundingLockArg,
+    ckbCapacity: formatCapacity(capacityShannons),
+    ckbCapacityShannons: capacityShannons.toString(),
   })
 }))
 

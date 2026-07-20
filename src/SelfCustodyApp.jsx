@@ -24,6 +24,7 @@ import {
 import './App.css'
 
 const RUSD_BASE = 100000000n
+const MIN_OPERATOR_CHANNEL_CAPACITY = 200n * 100000000n
 const CKB_TESTNET_FAUCET_URL = 'https://faucet.nervos.org/'
 const RUSD_TESTNET_FAUCET_URL = 'https://testnet0815.stablepp.xyz/stablecoin'
 const JOYID_TESTNET_URL = 'https://testnet.joyid.dev/'
@@ -546,6 +547,17 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
       }
 
       setStatus({ type: 'warning', message: 'Opening a self-funded Fiber channel from this browser wallet...' })
+      const operatorStatus = await api('/fiber/operator')
+      const operatorCapacity = BigInt(String(operatorStatus.ckbCapacityShannons || '0'))
+      setProof((current) => ({
+        ...(current || {}),
+        operatorFundingAddress: operatorStatus.fundingAddress,
+        operatorCkbCapacity: operatorStatus.ckbCapacity,
+        operatorCkbCapacityShannons: operatorStatus.ckbCapacityShannons,
+      }))
+      if (operatorCapacity < MIN_OPERATOR_CHANNEL_CAPACITY) {
+        throw new Error(`Dular operator needs testnet CKB capacity before it can accept this channel. Current operator balance is ${operatorStatus.ckbCapacity}. Send at least 200 CKB to ${operatorStatus.fundingAddress}, tap Sync, then retry.`)
+      }
       const clearedOperatorChannels = await requestClearOperatorStale(nodeInfo.pubkey)
       const clearedChannels = await clearStaleOperatorChannels(operatorPubkey)
       const opened = await browserOpenRUsdChannel({
@@ -647,6 +659,8 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
           <ProofRow label="On-chain CKB" value={funding?.capacity || 'Tap Sync after funding'} />
           <ProofRow label="On-chain RUSD" value={funding?.rusdBaseUnits ? formatRUsd(funding.rusdBaseUnits) : 'Tap Sync after funding'} />
           <ProofRow label="Channel peer" value={operatorPubkey || 'Connecting'} />
+          <ProofRow label="Operator CKB address" value={operatorInfo?.fundingAddress || 'Sync to load'} />
+          <ProofRow label="Operator CKB capacity" value={operatorInfo?.ckbCapacity || 'Sync to load'} />
         </ProofDrawer>
       </div>
       <Status state={status} />
@@ -658,6 +672,8 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
           {proof.requestedAmountBaseUnits && <ProofRow label="Requested amount" value={formatRUsd(proof.requestedAmountBaseUnits)} />}
           {proof.walletCapacity && <ProofRow label="Detected CKB" value={proof.walletCapacity} />}
           {proof.walletRUsdBaseUnits && <ProofRow label="Detected RUSD" value={formatRUsd(proof.walletRUsdBaseUnits)} />}
+          {proof.operatorFundingAddress && <ProofRow label="Operator CKB address" value={proof.operatorFundingAddress} />}
+          {proof.operatorCkbCapacity && <ProofRow label="Operator CKB capacity" value={proof.operatorCkbCapacity} />}
           {proof.latestLocalBalance && <ProofRow label="Spendable in channel" value={formatRUsd(proof.latestLocalBalance)} />}
           {proof.diagnosticCheckedAt && <ProofRow label="Diagnostics checked" value={new Date(proof.diagnosticCheckedAt).toLocaleTimeString()} />}
           {proof.browserPeerCount !== undefined && <ProofRow label="Browser peer count" value={String(proof.browserPeerCount)} />}
@@ -1307,10 +1323,11 @@ export default function SelfCustodyApp() {
       setNetworkStatus({ type: 'warning', message: 'Refreshing wallet network state...' })
     }
 
-    const [infoResult, peersResult, channelsResult] = await Promise.allSettled([
+    const [infoResult, peersResult, channelsResult, operatorResult] = await Promise.allSettled([
       browserNodeInfo(),
       browserListPeers(),
       browserListChannels(),
+      api('/fiber/operator'),
     ])
 
     if (infoResult.status !== 'fulfilled') {
@@ -1334,6 +1351,12 @@ export default function SelfCustodyApp() {
       setChannels(channelsResult.value)
     } else {
       partialErrors.push(channelsResult.reason?.message || 'Could not refresh channels.')
+    }
+
+    if (operatorResult.status === 'fulfilled') {
+      setOperatorInfo(operatorResult.value)
+    } else {
+      partialErrors.push(operatorResult.reason?.message || 'Could not refresh operator capacity.')
     }
 
     const lockArg = getFundingLockArg(nextInfo)
