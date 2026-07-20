@@ -554,7 +554,7 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
       })
       setProof((current) => ({ ...(current || {}), opened, clearedChannels }))
 
-      setStatus({ type: 'warning', message: 'Funding transaction submitted. Keep this tab open while the channel becomes ready.' })
+      setStatus({ type: 'warning', message: 'Channel negotiation started. Keep this tab open while Fiber prepares the funding transaction.' })
       const ready = await waitForSelfFundedChannel(operatorPubkey, fundingAmountBaseUnits, (snapshot) => {
         setProof((current) => ({ ...(current || {}), ...snapshot }))
       })
@@ -571,10 +571,27 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
         type: ready.channel ? 'success' : 'warning',
         message: ready.channel
           ? `${formatRUsd(fundingAmountBaseUnits)} self-funded channel is ready. You can now send from this wallet.`
-          : 'The self-funded channel was submitted but is not ready yet. Keep this tab open and tap Sync shortly.',
+          : 'The self-funded channel is still negotiating and no funding outpoint is visible yet. Clear the temporary channel and retry if this does not change.',
       })
     } catch (error) {
       setStatus({ type: 'error', message: error.message || 'Could not open self-funded channel.' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function clearTemporaryChannel() {
+    const channelId = proof?.opened?.temporary_channel_id || proof?.pendingChannels?.[0]?.channel_id
+    if (!channelId) return
+    setLoading(true)
+    setStatus({ type: 'warning', message: 'Clearing temporary channel...' })
+    try {
+      await browserAbandonChannel(channelId)
+      await onRefreshNetwork({ silent: true })
+      setProof((current) => ({ ...(current || {}), clearedManually: channelId, opened: null }))
+      setStatus({ type: 'success', message: 'Temporary channel cleared. You can retry opening a self-funded channel.' })
+    } catch (error) {
+      setStatus({ type: 'error', message: error.message || 'Could not clear temporary channel.' })
     } finally {
       setLoading(false)
     }
@@ -630,7 +647,13 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
           {proof.walletRUsdBaseUnits && <ProofRow label="Detected RUSD" value={formatRUsd(proof.walletRUsdBaseUnits)} />}
           {proof.latestLocalBalance && <ProofRow label="Spendable in channel" value={formatRUsd(proof.latestLocalBalance)} />}
           {proof.clearedChannels?.length > 0 && <ProofRow label="Cleared stale channels" value={proof.clearedChannels.join(', ')} />}
+          {proof.clearedManually && <ProofRow label="Cleared manually" value={proof.clearedManually} />}
           {proof.pendingChannels?.length > 0 && <ProofRow label="Pending channels" value={proof.pendingChannels.map((channel) => `${channel.channel_id}:${channelStateName(channel)}`).join(', ')} />}
+          {(proof.opened?.temporary_channel_id || proof.pendingChannels?.length > 0) && !proof.readyChannel && (
+            <button type="button" className="secondaryBtn fullWidth" onClick={clearTemporaryChannel} disabled={loading}>
+              Clear temporary channel
+            </button>
+          )}
         </ProofDrawer>
       )}
     </div>
@@ -842,7 +865,7 @@ async function waitForSelfFundedChannel(operatorPubkey, requiredBaseUnits, onUpd
   let latestChannels = null
   let senderRoute = null
 
-  for (let attempt = 0; attempt < 36; attempt += 1) {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
     if (attempt > 0) await wait(5000)
     latestChannels = await browserListChannels()
     senderRoute = findSenderRouteChannel(latestChannels, operatorPubkey, requiredBaseUnits)
