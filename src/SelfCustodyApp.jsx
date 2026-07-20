@@ -55,6 +55,13 @@ function formatRUsd(value, compact = false) {
   return compact ? display : `${display} RUSD`
 }
 
+function operatorRUsdAutoAcceptBaseUnits(operatorInfo) {
+  const rusdInfo = (operatorInfo?.operator?.udt_cfg_infos || []).find((asset) => asset.name === 'RUSD')
+  const raw = rusdInfo?.auto_accept_amount
+  if (!raw) return 0n
+  return BigInt(String(raw))
+}
+
 function sumChannelBalance(channels = []) {
   return channels.reduce((total, channel) => total + BigInt(channel.local_balance || '0x0'), 0n)
 }
@@ -509,6 +516,7 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
   const [loading, setLoading] = useState(false)
   const [proof, setProof] = useState(null)
   const operatorPubkey = operatorInfo?.operator?.pubkey || ''
+  const operatorAutoAcceptMinimum = operatorRUsdAutoAcceptBaseUnits(operatorInfo)
   const fundedPendingChannel = proof?.fundedPendingChannel || proof?.pendingChannels?.find((channel) => channel.channel_outpoint)
   const canClearTemporaryChannel = (proof?.opened?.temporary_channel_id || proof?.pendingChannels?.length > 0)
     && !proof?.readyChannel
@@ -553,14 +561,19 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
       setStatus({ type: 'warning', message: 'Opening a self-funded Fiber channel from this browser wallet...' })
       const operatorStatus = await api('/fiber/operator')
       const operatorCapacity = BigInt(String(operatorStatus.ckbCapacityShannons || '0'))
+      const currentOperatorMinimum = operatorRUsdAutoAcceptBaseUnits(operatorStatus)
       setProof((current) => ({
         ...(current || {}),
         operatorFundingAddress: operatorStatus.fundingAddress,
         operatorCkbCapacity: operatorStatus.ckbCapacity,
         operatorCkbCapacityShannons: operatorStatus.ckbCapacityShannons,
+        operatorAutoAcceptMinimum: currentOperatorMinimum.toString(),
       }))
       if (operatorCapacity < MIN_OPERATOR_CHANNEL_CAPACITY) {
         throw new Error(`Dular operator needs testnet CKB capacity before it can accept this channel. Current operator balance is ${operatorStatus.ckbCapacity}. Send at least 200 CKB to ${operatorStatus.fundingAddress}, tap Sync, then retry.`)
+      }
+      if (currentOperatorMinimum > 0n && fundingAmountBaseUnits < currentOperatorMinimum) {
+        throw new Error(`Minimum self-funded channel amount is ${formatRUsd(currentOperatorMinimum)} on the current operator node. Add more RUSD or retry with at least that amount.`)
       }
       const clearedOperatorChannels = await requestClearOperatorStale(nodeInfo.pubkey)
       const clearedChannels = await clearStaleOperatorChannels(operatorPubkey)
@@ -682,6 +695,7 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
           <ProofRow label="Channel peer" value={operatorPubkey || 'Connecting'} />
           <ProofRow label="Operator CKB address" value={operatorInfo?.fundingAddress || 'Sync to load'} />
           <ProofRow label="Operator CKB capacity" value={operatorInfo?.ckbCapacity || 'Sync to load'} />
+          <ProofRow label="Minimum channel" value={operatorAutoAcceptMinimum > 0n ? formatRUsd(operatorAutoAcceptMinimum) : 'Sync to load'} />
         </ProofDrawer>
       </div>
       <Status state={status} />
@@ -696,6 +710,7 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
           {proof.walletRUsdBaseUnits && <ProofRow label="Detected RUSD" value={formatRUsd(proof.walletRUsdBaseUnits)} />}
           {proof.operatorFundingAddress && <ProofRow label="Operator CKB address" value={proof.operatorFundingAddress} />}
           {proof.operatorCkbCapacity && <ProofRow label="Operator CKB capacity" value={proof.operatorCkbCapacity} />}
+          {proof.operatorAutoAcceptMinimum && <ProofRow label="Minimum channel" value={formatRUsd(proof.operatorAutoAcceptMinimum)} />}
           {proof.latestLocalBalance && <ProofRow label="Spendable in channel" value={formatRUsd(proof.latestLocalBalance)} />}
           {proof.diagnosticCheckedAt && <ProofRow label="Diagnostics checked" value={new Date(proof.diagnosticCheckedAt).toLocaleTimeString()} />}
           {proof.browserPeerCount !== undefined && <ProofRow label="Browser peer count" value={String(proof.browserPeerCount)} />}
