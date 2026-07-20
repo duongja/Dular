@@ -66,8 +66,14 @@ export async function createReceiverInvoice({ amountBaseUnits, description }) {
   return result
 }
 
-export async function listChannelsByPeer(pubkey, rpcUrl = config.fiberRpcUrl) {
-  return fiberRpc('list_channels', [{ pubkey }], rpcUrl)
+export async function listChannelsByPeer(pubkey, options = {}, rpcUrl = config.fiberRpcUrl) {
+  if (typeof options === 'string') {
+    rpcUrl = options
+    options = {}
+  }
+  const params = { pubkey }
+  if (options.includeClosed) params.include_closed = true
+  return fiberRpc('list_channels', [params], rpcUrl)
 }
 
 export async function listFiberPeers(rpcUrl = config.fiberRpcUrl) {

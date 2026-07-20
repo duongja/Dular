@@ -746,6 +746,107 @@ app.get('/api/fiber/operator', requireAuth, asyncHandler(async (_req, res) => {
   })
 }))
 
+app.post('/api/fiber/browser/diagnostics', requireAuth, asyncHandler(async (req, res) => {
+  const pubkey = String(req.body.pubkey || req.user.fiber_pubkey || '').trim().toLowerCase()
+  const temporaryChannelId = String(req.body.temporaryChannelId || '').trim().toLowerCase()
+  if (!/^[0-9a-f]{66}$/.test(pubkey)) throw new Error('A valid browser Fiber pubkey is required')
+
+  const [operatorResult, peersResult, channelsResult] = await Promise.allSettled([
+    getNodeInfo(),
+    listFiberPeers(),
+    listChannelsByPeer(pubkey, { includeClosed: true }),
+  ])
+
+  const operator = operatorResult.status === 'fulfilled' ? operatorResult.value : {}
+  const peers = peersResult.status === 'fulfilled' ? peersResult.value : { peers: [] }
+  const channelsByPeer = channelsResult.status === 'fulfilled' ? channelsResult.value : { channels: [] }
+  const operatorPeer = (peers.peers || []).find((peer) => String(peer.pubkey || '').toLowerCase() === pubkey)
+  const channels = channelsByPeer.channels || []
+  const matchingChannel = temporaryChannelId
+    ? channels.find((channel) => String(channel.channel_id || '').toLowerCase() === temporaryChannelId
+      || String(channel.temporary_channel_id || '').toLowerCase() === temporaryChannelId)
+    : null
+  const operatorErrors = [
+    operatorResult.status === 'rejected' ? `node_info: ${operatorResult.reason?.message || operatorResult.reason}` : '',
+    peersResult.status === 'rejected' ? `list_peers: ${peersResult.reason?.message || peersResult.reason}` : '',
+    channelsResult.status === 'rejected' ? `list_channels: ${channelsResult.reason?.message || channelsResult.reason}` : '',
+  ].filter(Boolean)
+  const channelSummary = channels.map((channel) => ({
+    channelId: channel.channel_id,
+    temporaryChannelId: channel.temporary_channel_id,
+    state: channelStateName(channel),
+    flags: channel.state?.state_flags || channel.state_flags || '',
+    localBalance: String(channel.local_balance || '0x0'),
+    remoteBalance: String(channel.remote_balance || '0x0'),
+    channelOutpoint: channel.channel_outpoint || null,
+    isPublic: isPublicChannel(channel),
+  }))
+
+  console.log('fiber_browser_diagnostics', JSON.stringify({
+    checkedAt: new Date().toISOString(),
+    browserPubkey: pubkey,
+    temporaryChannelId,
+    operatorPubkey: operator.pubkey || null,
+    operatorSeesBrowserPeer: Boolean(operatorPeer),
+    operatorPeerAddress: operatorPeer?.address || operatorPeer?.addresses || null,
+    operatorChannelCountForBrowser: channels.length,
+    operatorSeesTemporaryChannel: Boolean(matchingChannel),
+    operatorErrors,
+    channelSummary,
+  }))
+
+  res.json({
+    ok: true,
+    checkedAt: new Date().toISOString(),
+    browserPubkey: pubkey,
+    temporaryChannelId,
+    operatorPubkey: operator.pubkey || '',
+    operatorPeer: operatorPeer || null,
+    operatorSeesBrowserPeer: Boolean(operatorPeer),
+    operatorPeerAddress: operatorPeer?.address || operatorPeer?.addresses || '',
+    operatorChannelCountForBrowser: channels.length,
+    operatorChannelsForBrowser: channels,
+    operatorChannelsSummary: channelSummary,
+    operatorMatchingChannel: matchingChannel || null,
+    operatorSeesTemporaryChannel: Boolean(matchingChannel),
+    operatorErrors,
+  })
+}))
+
+app.post('/api/fiber/browser/clear-operator-stale', requireAuth, asyncHandler(async (req, res) => {
+  const pubkey = String(req.body.pubkey || req.user.fiber_pubkey || '').trim().toLowerCase()
+  if (!/^[0-9a-f]{66}$/.test(pubkey)) throw new Error('A valid browser Fiber pubkey is required')
+
+  const channelsByPeer = await listChannelsByPeer(pubkey)
+  const staleChannels = (channelsByPeer.channels || []).filter((channel) => {
+    const state = channelStateName(channel)
+    return state
+      && state !== 'ChannelReady'
+      && !channel.channel_outpoint
+  })
+
+  const cleared = []
+  const errors = []
+  for (const channel of staleChannels) {
+    try {
+      await abandonFiberChannel(channel.channel_id)
+      cleared.push(channel.channel_id)
+    } catch (error) {
+      errors.push(`${channel.channel_id}: ${error.message || String(error)}`)
+    }
+  }
+
+  console.log('fiber_clear_operator_stale', JSON.stringify({
+    checkedAt: new Date().toISOString(),
+    browserPubkey: pubkey,
+    staleCount: staleChannels.length,
+    cleared,
+    errors,
+  }))
+
+  res.json({ cleared, errors })
+}))
+
 app.post('/api/fiber/register-device', requireAuth, asyncHandler(async (req, res) => {
   const fiberPubkey = String(req.body.fiberPubkey || '').trim().toLowerCase()
   if (!/^[0-9a-f]{66}$/.test(fiberPubkey)) {

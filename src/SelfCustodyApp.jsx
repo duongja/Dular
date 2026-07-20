@@ -546,18 +546,31 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
       }
 
       setStatus({ type: 'warning', message: 'Opening a self-funded Fiber channel from this browser wallet...' })
+      const clearedOperatorChannels = await requestClearOperatorStale(nodeInfo.pubkey)
       const clearedChannels = await clearStaleOperatorChannels(operatorPubkey)
       const opened = await browserOpenRUsdChannel({
         pubkey: operatorPubkey,
         amountHex: toBaseUnitsHex(amount),
         isPublic: true,
       })
-      setProof((current) => ({ ...(current || {}), opened, clearedChannels }))
+      setProof((current) => ({ ...(current || {}), opened, clearedChannels, clearedOperatorChannels }))
+      const initialDiagnostics = await collectSelfChannelDiagnostics({
+        browserPubkey: nodeInfo.pubkey,
+        operatorPubkey,
+        temporaryChannelId: opened.temporary_channel_id,
+      })
+      setProof((current) => ({ ...(current || {}), ...initialDiagnostics }))
 
       setStatus({ type: 'warning', message: 'Channel negotiation started. Keep this tab open while Fiber prepares the funding transaction.' })
       const ready = await waitForSelfFundedChannel(operatorPubkey, fundingAmountBaseUnits, (snapshot) => {
         setProof((current) => ({ ...(current || {}), ...snapshot }))
       })
+      const finalDiagnostics = await collectSelfChannelDiagnostics({
+        browserPubkey: nodeInfo.pubkey,
+        operatorPubkey,
+        temporaryChannelId: opened.temporary_channel_id,
+      })
+      setProof((current) => ({ ...(current || {}), ...finalDiagnostics }))
 
       if (ready.channel?.channel_id) {
         try {
@@ -646,6 +659,31 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
           {proof.walletCapacity && <ProofRow label="Detected CKB" value={proof.walletCapacity} />}
           {proof.walletRUsdBaseUnits && <ProofRow label="Detected RUSD" value={formatRUsd(proof.walletRUsdBaseUnits)} />}
           {proof.latestLocalBalance && <ProofRow label="Spendable in channel" value={formatRUsd(proof.latestLocalBalance)} />}
+          {proof.diagnosticCheckedAt && <ProofRow label="Diagnostics checked" value={new Date(proof.diagnosticCheckedAt).toLocaleTimeString()} />}
+          {proof.browserPeerCount !== undefined && <ProofRow label="Browser peer count" value={String(proof.browserPeerCount)} />}
+          {proof.browserSeesOperatorPeer !== undefined && <ProofRow label="Browser sees operator" value={proof.browserSeesOperatorPeer ? 'Yes' : 'No'} />}
+          {proof.browserTemporaryChannelState && <ProofRow label="Browser temp channel" value={proof.browserTemporaryChannelState} />}
+          {proof.browserOperatorChannelsSummary && <ProofRow label="Browser operator channels" value={proof.browserOperatorChannelsSummary} />}
+          {proof.operatorDiagnostics?.operatorSeesBrowserPeer !== undefined && <ProofRow label="Operator sees browser" value={proof.operatorDiagnostics.operatorSeesBrowserPeer ? 'Yes' : 'No'} />}
+          {proof.operatorDiagnostics?.operatorPeerAddress && <ProofRow label="Operator peer address" value={Array.isArray(proof.operatorDiagnostics.operatorPeerAddress) ? proof.operatorDiagnostics.operatorPeerAddress.join(', ') : proof.operatorDiagnostics.operatorPeerAddress} />}
+          {proof.operatorDiagnostics?.operatorSeesTemporaryChannel !== undefined && <ProofRow label="Operator sees temp channel" value={proof.operatorDiagnostics.operatorSeesTemporaryChannel ? 'Yes' : 'No'} />}
+          {proof.operatorDiagnostics?.operatorChannelCountForBrowser !== undefined && <ProofRow label="Operator channel count" value={String(proof.operatorDiagnostics.operatorChannelCountForBrowser)} />}
+          {proof.operatorDiagnostics?.operatorChannelsSummary?.length > 0 && (
+            <ProofRow
+              label="Operator channels"
+              value={proof.operatorDiagnostics.operatorChannelsSummary.map((channel) => [
+                shortId(channel.channelId || channel.temporaryChannelId || 'unknown', 8),
+                channel.state || 'unknown',
+                channel.flags || 'no flags',
+                `local ${formatRUsd(channel.localBalance, true)}`,
+                channel.channelOutpoint ? `outpoint ${shortId(channel.channelOutpoint, 8)}` : 'no outpoint',
+              ].join(' / ')).join(' | ')}
+            />
+          )}
+          {proof.operatorDiagnostics?.operatorErrors?.length > 0 && <ProofRow label="Operator diagnostic errors" value={proof.operatorDiagnostics.operatorErrors.join(' | ')} />}
+          {proof.diagnosticError && <ProofRow label="Browser diagnostic errors" value={proof.diagnosticError} />}
+          {proof.clearedOperatorChannels?.cleared?.length > 0 && <ProofRow label="Cleared operator stale" value={proof.clearedOperatorChannels.cleared.join(', ')} />}
+          {proof.clearedOperatorChannels?.errors?.length > 0 && <ProofRow label="Operator cleanup errors" value={proof.clearedOperatorChannels.errors.join(' | ')} />}
           {proof.clearedChannels?.length > 0 && <ProofRow label="Cleared stale channels" value={proof.clearedChannels.join(', ')} />}
           {proof.clearedManually && <ProofRow label="Cleared manually" value={proof.clearedManually} />}
           {proof.pendingChannels?.length > 0 && <ProofRow label="Pending channels" value={proof.pendingChannels.map((channel) => `${channel.channel_id}:${channelStateName(channel)}`).join(', ')} />}
@@ -816,6 +854,63 @@ async function requestInvoiceRoute(invoice) {
     method: 'POST',
     body: JSON.stringify({ invoice }),
   })
+}
+
+async function requestBrowserDiagnostics(pubkey, temporaryChannelId = '') {
+  return api('/fiber/browser/diagnostics', {
+    method: 'POST',
+    body: JSON.stringify({ pubkey, temporaryChannelId }),
+  })
+}
+
+async function requestClearOperatorStale(pubkey) {
+  return api('/fiber/browser/clear-operator-stale', {
+    method: 'POST',
+    body: JSON.stringify({ pubkey }),
+  })
+}
+
+function summarizeChannels(channels = []) {
+  if (!channels.length) return 'None'
+  return channels.map((channel) => [
+    shortId(channel.channel_id || 'unknown', 8),
+    channelStateName(channel) || 'unknown',
+    channel.state?.state_flags || channel.state_flags || 'no flags',
+    `local ${formatRUsd(channelLocalBalanceBaseUnits(channel), true)}`,
+    channel.channel_outpoint ? `outpoint ${shortId(channel.channel_outpoint, 8)}` : 'no outpoint',
+  ].join(' / ')).join(' | ')
+}
+
+async function collectSelfChannelDiagnostics({ browserPubkey, operatorPubkey, temporaryChannelId }) {
+  const [browserPeers, browserChannels, operatorDiagnostics] = await Promise.allSettled([
+    browserListPeers(),
+    browserListChannels(),
+    requestBrowserDiagnostics(browserPubkey, temporaryChannelId),
+  ])
+
+  const browserPeerList = browserPeers.status === 'fulfilled' ? browserPeers.value?.peers || [] : []
+  const browserChannelList = browserChannels.status === 'fulfilled' ? browserChannels.value?.channels || [] : []
+  const normalizedOperator = normalizePubkey(operatorPubkey)
+  const browserOperatorChannels = browserChannelList.filter((channel) => normalizePubkey(channel.pubkey) === normalizedOperator)
+  const browserMatchingChannel = temporaryChannelId
+    ? browserChannelList.find((channel) => String(channel.channel_id || '').toLowerCase() === temporaryChannelId.toLowerCase())
+    : null
+
+  const diagnostics = {
+    diagnosticCheckedAt: new Date().toISOString(),
+    browserPeerCount: browserPeerList.length,
+    browserSeesOperatorPeer: browserPeerList.some((peer) => normalizePubkey(peer.pubkey) === normalizedOperator),
+    browserTemporaryChannelState: browserMatchingChannel ? `${channelStateName(browserMatchingChannel)} / ${browserMatchingChannel.state?.state_flags || browserMatchingChannel.state_flags || 'no flags'}` : 'Not visible in browser list_channels',
+    browserOperatorChannelsSummary: summarizeChannels(browserOperatorChannels),
+    operatorDiagnostics: operatorDiagnostics.status === 'fulfilled' ? operatorDiagnostics.value : null,
+    diagnosticError: [
+      browserPeers.status === 'rejected' ? `browser peers: ${browserPeers.reason?.message || browserPeers.reason}` : '',
+      browserChannels.status === 'rejected' ? `browser channels: ${browserChannels.reason?.message || browserChannels.reason}` : '',
+      operatorDiagnostics.status === 'rejected' ? `operator: ${operatorDiagnostics.reason?.message || operatorDiagnostics.reason}` : '',
+    ].filter(Boolean).join(' | '),
+  }
+  console.info('Dular self-funded channel diagnostics', diagnostics)
+  return diagnostics
 }
 
 async function retryReceiveRoute(pubkey, addresses, options = {}) {
