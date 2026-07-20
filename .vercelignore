@@ -1,0 +1,8 @@
+.env
+.env.*
+.vercel
+.fiber-node-fresh/
+.fiber-node-receiver/
+node_modules/
+dist/
+*.log
