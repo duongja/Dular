@@ -312,6 +312,8 @@ function SelfCustodyDashboard({
   const readyChannels = (channels?.channels || []).filter(isReadyChannel)
   const spendableBaseUnits = sumChannelBalance(readyChannels)
   const spendableBalance = formatRUsd(spendableBaseUnits)
+  const onChainRUsdBaseUnits = BigInt(String(funding?.rusdBaseUnits || '0'))
+  const onChainRUsdBalance = formatRUsd(onChainRUsdBaseUnits)
   const walletAddress = funding?.address || ''
 
   return (
@@ -334,15 +336,24 @@ function SelfCustodyDashboard({
         <div className="screenStack">
           <section className="balanceCard walletBalanceCard">
             <div className="balanceTopline">
-              <span>Available to send</span>
+              <span>Spendable in Fiber</span>
               <button type="button" className="ghostBtn" onClick={() => onRefreshNetwork()} disabled={refreshingNetwork}>
                 {refreshingNetwork ? 'Checking...' : 'Sync'}
               </button>
             </div>
             <strong>{spendableBalance}</strong>
+            <div className="balanceBreakdown">
+              <span>On-chain faucet funds</span>
+              <strong>{onChainRUsdBalance}</strong>
+            </div>
             <p>
-              Use Dular like a mobile money wallet. The keys stay on this phone, and Fiber handles settlement behind the scenes.
+              Faucet RUSD appears on-chain first. Open a self-funded channel to make it spendable over Fiber.
             </p>
+            {onChainRUsdBaseUnits > 0n && spendableBaseUnits === 0n && (
+              <button type="button" className="secondaryBtn fullWidth" onClick={() => scrollToPanel('add-funds')}>
+                Open self-funded channel
+              </button>
+            )}
             {lastNetworkRefreshAt && (
               <p className="balanceMeta">Last checked {lastNetworkRefreshAt}</p>
             )}
@@ -381,6 +392,10 @@ function SelfCustodyDashboard({
                 <strong>{readyChannels.length}</strong>
               </div>
               <div>
+                <span>On-chain RUSD</span>
+                <strong>{formatRUsd(onChainRUsdBaseUnits, true)}</strong>
+              </div>
+              <div>
                 <span>Peers</span>
                 <strong>{peers?.peers?.length || 0}</strong>
               </div>
@@ -392,6 +407,7 @@ function SelfCustodyDashboard({
               <ProofRow label="Node pubkey" value={nodeInfo?.pubkey || 'Not loaded'} />
               <ProofRow label="Addresses" value={nodeInfo?.addresses?.join(', ') || 'Not advertised'} />
               <ProofRow label="Wallet CKB capacity" value={funding?.capacity || 'Unknown'} />
+              <ProofRow label="Wallet on-chain RUSD" value={onChainRUsdBalance} />
             </ProofDrawer>
           </section>
 
@@ -403,7 +419,7 @@ function SelfCustodyDashboard({
               </div>
             </div>
             <p className="muted">
-              For this testnet build, fund this browser wallet with testnet CKB from the faucet, then add RUSD to spend in the app.
+              Fund this browser wallet with testnet CKB and RUSD from faucets, then open a self-funded Fiber channel to spend.
             </p>
             <div className="buttonRow wrapButtons">
               <a
