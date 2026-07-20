@@ -489,6 +489,15 @@ function TopUpCard({ nodeInfo, walletAddress, operatorInfo, onRefreshNetwork }) 
   const [proof, setProof] = useState(null)
   const operatorFundingAddress = operatorInfo?.fundingAddress || ''
 
+  function showOperatorFundingRequired(result, fundingAmountBaseUnits) {
+    if (result.nextAction !== 'fund_operator_rusd') return false
+    setStatus({
+      type: 'warning',
+      message: `Dular's testnet operator needs RUSD liquidity before it can credit this wallet. Send at least ${formatRUsd(fundingAmountBaseUnits)} from the RUSD faucet to the operator address below, then tap Add test RUSD again.`,
+    })
+    return true
+  }
+
   async function submit(event) {
     event.preventDefault()
     if (!nodeInfo?.pubkey) {
@@ -511,6 +520,7 @@ function TopUpCard({ nodeInfo, walletAddress, operatorInfo, onRefreshNetwork }) 
 
       let result = await requestSeedLiquidity(invoice.invoice_address, nodeInfo.pubkey, nodeInfo.addresses || [], { fundingAmountBaseUnits })
       setProof((current) => ({ ...(current || {}), ...result, invoice }))
+      if (showOperatorFundingRequired(result, fundingAmountBaseUnits)) return
 
       if (result.nextAction === 'accept_channel') {
         setStatus({ type: 'warning', message: 'Approving the incoming Fiber channel on this device...' })
@@ -531,6 +541,7 @@ function TopUpCard({ nodeInfo, walletAddress, operatorInfo, onRefreshNetwork }) 
         await onRefreshNetwork({ silent: true })
         result = await retrySeedLiquidity(invoice.invoice_address, nodeInfo.pubkey, nodeInfo.addresses || [], { fundingAmountBaseUnits })
         setProof((current) => ({ ...(current || {}), ...result, acceptedChannels: accepted, invoice }))
+        if (showOperatorFundingRequired(result, fundingAmountBaseUnits)) return
       }
 
       await onRefreshNetwork({ silent: true })
@@ -592,6 +603,8 @@ function TopUpCard({ nodeInfo, walletAddress, operatorInfo, onRefreshNetwork }) 
           {proof.acceptedChannels?.length > 0 && <ProofRow label="Accepted channels" value={proof.acceptedChannels.map((channel) => channel.channelId).join(', ')} />}
           {proof.pendingChannels?.length > 0 && <ProofRow label="Pending channels" value={proof.pendingChannels.map((channel) => `${channel.channel_id}:${channelStateName(channel)}`).join(', ')} />}
           {proof.outboundLiquidity && <ProofRow label="Operator outbound" value={formatRUsd(proof.outboundLiquidity)} />}
+          {proof.operatorOnChainRUsd !== undefined && proof.operatorOnChainRUsd !== null && <ProofRow label="Operator on-chain RUSD" value={formatRUsd(proof.operatorOnChainRUsd)} />}
+          {proof.operatorFundingAddress && <ProofRow label="Operator funding address" value={proof.operatorFundingAddress} />}
         </ProofDrawer>
       )}
     </div>
@@ -615,6 +628,13 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
       const fundingAmountBaseUnits = toBaseUnits(amount).toString()
       let result = await requestReceiveRoute(nodeInfo.pubkey, nodeInfo.addresses || [], { fundingAmountBaseUnits })
       setBootstrap(result)
+      if (result.nextAction === 'fund_operator_rusd') {
+        setStatus({
+          type: 'warning',
+          message: `Dular's testnet operator needs RUSD liquidity before it can prepare this receive route. Send at least ${formatRUsd(fundingAmountBaseUnits)} to the operator funding address shown below, then prepare again.`,
+        })
+        return
+      }
 
       if (result.nextAction === 'accept_channel') {
         setStatus({ type: 'warning', message: 'Approving a secure receive route on this device...' })
@@ -635,6 +655,13 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
         await onRefreshNetwork({ silent: true })
         result = await retryReceiveRoute(nodeInfo.pubkey, nodeInfo.addresses || [], { fundingAmountBaseUnits })
         setBootstrap((current) => ({ ...(current || {}), ...result, acceptedChannels: accepted }))
+        if (result.nextAction === 'fund_operator_rusd') {
+          setStatus({
+            type: 'warning',
+            message: `Dular's testnet operator needs RUSD liquidity before it can finish this receive route. Send at least ${formatRUsd(fundingAmountBaseUnits)} to the operator funding address shown below, then prepare again.`,
+          })
+          return
+        }
       }
 
       await onRefreshNetwork({ silent: true })
@@ -714,6 +741,8 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
               {bootstrap.abandonedPendingChannels?.length > 0 && <ProofRow label="Cleared stale channels" value={bootstrap.abandonedPendingChannels.join(', ')} />}
               {bootstrap.outboundLiquidity && <ProofRow label="Operator outbound" value={formatRUsd(bootstrap.outboundLiquidity)} />}
               {bootstrap.requiredOutboundLiquidity && <ProofRow label="Required outbound" value={formatRUsd(bootstrap.requiredOutboundLiquidity)} />}
+              {bootstrap.operatorOnChainRUsd !== undefined && bootstrap.operatorOnChainRUsd !== null && <ProofRow label="Operator on-chain RUSD" value={formatRUsd(bootstrap.operatorOnChainRUsd)} />}
+              {bootstrap.operatorFundingAddress && <ProofRow label="Operator funding address" value={bootstrap.operatorFundingAddress} />}
               {bootstrap.connectError && <ProofRow label="Connect note" value={bootstrap.connectError} />}
             </ProofDrawer>
           )}

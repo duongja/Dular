@@ -25,6 +25,7 @@ import {
   listFiberPeers,
   openFundedRUsdChannel,
   parseFiberInvoice,
+  RUSD_TYPE_SCRIPT,
   sendFiberPayment,
   updateFiberChannel,
 } from './services/fiber.js'
@@ -224,9 +225,33 @@ async function prepareBrowserOutboundChannel({ pubkey, fundingAmountBaseUnits, r
   let readyChannel = outboundLiquidity >= fundingAmountBaseUnits
     ? readyChannels.find((channel) => channelLocalBalance(channel) >= fundingAmountBaseUnits) || readyChannels[0] || null
     : null
+  let fundingStatus = null
 
   const abandonedPendingChannels = []
-  if (outboundLiquidity < fundingAmountBaseUnits && pendingChannels.length && replacePending) {
+  const shouldClearPending = outboundLiquidity < fundingAmountBaseUnits
+    && pendingChannels.length
+    && (replacePending || stalePendingChannels(pendingChannels).length === pendingChannels.length)
+
+  if (outboundLiquidity < fundingAmountBaseUnits && pendingChannels.length) {
+    fundingStatus = await operatorFundingStatus(fundingAmountBaseUnits)
+    if (!fundingStatus.hasEnoughRUsd) {
+      return {
+        connectedPeer,
+        abandonedPendingChannels,
+        channelBootstrap: null,
+        pendingChannel: existingPending,
+        pendingChannels,
+        readyChannel: null,
+        outboundLiquidity,
+        requiredOutboundLiquidity: fundingAmountBaseUnits,
+        operatorFundingAddress: fundingStatus.fundingAddress,
+        operatorOnChainRUsd: fundingStatus.onChainRUsd,
+        nextAction: 'fund_operator_rusd',
+      }
+    }
+  }
+
+  if (shouldClearPending) {
     for (const channel of pendingChannels) {
       await abandonFiberChannel(channel.channel_id)
       abandonedPendingChannels.push(channel.channel_id)
@@ -243,6 +268,22 @@ async function prepareBrowserOutboundChannel({ pubkey, fundingAmountBaseUnits, r
 
   let channelBootstrap = null
   if (!readyChannel && !existingPending) {
+    fundingStatus ||= await operatorFundingStatus(fundingAmountBaseUnits)
+    if (!fundingStatus.hasEnoughRUsd) {
+      return {
+        connectedPeer,
+        abandonedPendingChannels,
+        channelBootstrap: null,
+        pendingChannel: null,
+        pendingChannels: [],
+        readyChannel: null,
+        outboundLiquidity,
+        requiredOutboundLiquidity: fundingAmountBaseUnits,
+        operatorFundingAddress: fundingStatus.fundingAddress,
+        operatorOnChainRUsd: fundingStatus.onChainRUsd,
+        nextAction: 'fund_operator_rusd',
+      }
+    }
     channelBootstrap = await openFundedRUsdChannel({
       pubkey,
       fundingAmountBaseUnits,
@@ -269,6 +310,8 @@ async function prepareBrowserOutboundChannel({ pubkey, fundingAmountBaseUnits, r
     readyChannel,
     outboundLiquidity,
     requiredOutboundLiquidity: fundingAmountBaseUnits,
+    operatorFundingAddress: fundingStatus?.fundingAddress || '',
+    operatorOnChainRUsd: fundingStatus?.onChainRUsd || null,
     nextAction: readyChannel ? null : (channelBootstrap || existingPending ? 'accept_channel' : 'wait_for_channel_ready'),
   }
 }
@@ -351,7 +394,16 @@ function formatCapacity(capacityShannons) {
   return `${whole}.${fractional.toString().padStart(8, '0').replace(/0+$/, '')} (CKB)`
 }
 
-async function capacityByLockArg(lockArg) {
+function udtAmountFromData(data) {
+  const hexData = String(data || '0x').slice(2).padEnd(32, '0').slice(0, 32)
+  let amount = 0n
+  for (let index = 0; index < 16; index += 1) {
+    amount += BigInt(Number.parseInt(hexData.slice(index * 2, index * 2 + 2) || '0', 16)) << BigInt(index * 8)
+  }
+  return amount
+}
+
+async function cellsByLockArg(lockArg, filter = undefined) {
   const searchKey = {
     script: {
       code_hash: CKB_SECP256K1_BLAKE160_CODE_HASH,
@@ -359,22 +411,63 @@ async function capacityByLockArg(lockArg) {
       args: lockArg,
     },
     script_type: 'lock',
+    ...(filter ? { filter } : {}),
   }
   let cursor = null
-  let total = 0n
+  const cells = []
 
   do {
     const params = cursor
       ? [searchKey, 'asc', '0x64', cursor]
       : [searchKey, 'asc', '0x64']
     const result = await ckbRpc('get_cells', params)
-    for (const cell of result.objects || []) {
-      total += BigInt(cell.output?.capacity || '0x0')
-    }
+    cells.push(...(result.objects || []))
     cursor = result.last_cursor && result.last_cursor !== '0x' ? result.last_cursor : null
   } while (cursor)
 
+  return cells
+}
+
+async function capacityByLockArg(lockArg) {
+  const cells = await cellsByLockArg(lockArg)
+  const total = cells.reduce((sum, cell) => sum + BigInt(cell.output?.capacity || '0x0'), 0n)
   return formatCapacity(total)
+}
+
+async function udtAmountByLockArg(lockArg, typeScript) {
+  const cells = await cellsByLockArg(lockArg, { script: typeScript })
+  return cells.reduce((sum, cell) => sum + udtAmountFromData(cell.output_data), 0n)
+}
+
+function channelCreatedAtMs(channel) {
+  const raw = channel?.created_at || channel?.createdAt
+  if (!raw) return 0
+  try {
+    return Number(BigInt(raw))
+  } catch {
+    return 0
+  }
+}
+
+function stalePendingChannels(channels, maxAgeMs = 90_000) {
+  const now = Date.now()
+  return channels.filter((channel) => {
+    const createdAt = channelCreatedAtMs(channel)
+    return createdAt > 0 && now - createdAt > maxAgeMs
+  })
+}
+
+async function operatorFundingStatus(fundingAmountBaseUnits) {
+  const operator = await getNodeInfo()
+  const fundingLockArg = operator.default_funding_lock_script?.args || ''
+  const fundingAddress = fundingLockArg ? lockArgToAddress(fundingLockArg) : ''
+  const onChainRUsd = fundingLockArg ? await udtAmountByLockArg(fundingLockArg, RUSD_TYPE_SCRIPT) : 0n
+  return {
+    fundingLockArg,
+    fundingAddress,
+    onChainRUsd,
+    hasEnoughRUsd: onChainRUsd >= fundingAmountBaseUnits,
+  }
 }
 
 async function transferDevCapacity(address, capacityCkb) {
@@ -1002,6 +1095,8 @@ app.post('/api/fiber/browser/seed-liquidity', requireAuth, asyncHandler(async (r
     readyChannel,
     outboundLiquidity,
     requiredOutboundLiquidity,
+    operatorFundingAddress,
+    operatorOnChainRUsd,
     nextAction,
   } = prepared
 
@@ -1018,6 +1113,8 @@ app.post('/api/fiber/browser/seed-liquidity', requireAuth, asyncHandler(async (r
       payment: null,
       outboundLiquidity: outboundLiquidity.toString(),
       requiredOutboundLiquidity: requiredOutboundLiquidity.toString(),
+      operatorFundingAddress,
+      operatorOnChainRUsd: operatorOnChainRUsd === null || operatorOnChainRUsd === undefined ? null : operatorOnChainRUsd.toString(),
       nextAction,
     })
     return
@@ -1035,6 +1132,8 @@ app.post('/api/fiber/browser/seed-liquidity', requireAuth, asyncHandler(async (r
     readyChannel,
     outboundLiquidity: outboundLiquidity.toString(),
     requiredOutboundLiquidity: requiredOutboundLiquidity.toString(),
+    operatorFundingAddress,
+    operatorOnChainRUsd: operatorOnChainRUsd === null || operatorOnChainRUsd === undefined ? null : operatorOnChainRUsd.toString(),
     payment,
   })
 }))
@@ -1062,6 +1161,8 @@ app.post('/api/fiber/browser/prepare-receive-route', requireAuth, asyncHandler(a
     readyChannel: prepared.readyChannel,
     outboundLiquidity: prepared.outboundLiquidity.toString(),
     requiredOutboundLiquidity: prepared.requiredOutboundLiquidity.toString(),
+    operatorFundingAddress: prepared.operatorFundingAddress,
+    operatorOnChainRUsd: prepared.operatorOnChainRUsd === null || prepared.operatorOnChainRUsd === undefined ? null : prepared.operatorOnChainRUsd.toString(),
     hopHints: hopHint ? [hopHint] : [],
     nextAction: prepared.nextAction,
   })
