@@ -1,6 +1,5 @@
 import http from 'node:http'
 import net from 'node:net'
-import { WebSocketServer } from 'ws'
 
 const port = Number(process.env.PORT || 3000)
 const rpcUrl = process.env.FIBER_RPC_URL || 'http://127.0.0.1:8227'
@@ -82,44 +81,35 @@ const server = http.createServer(async (req, res) => {
   }
 })
 
-const wss = new WebSocketServer({ noServer: true })
-
-wss.on('connection', (socket) => {
-  const upstream = net.connect({ host: p2pHost, port: p2pPort })
-
-  socket.on('message', (data, isBinary) => {
-    upstream.write(isBinary ? data : Buffer.from(data))
-  })
-
-  upstream.on('data', (chunk) => {
-    if (socket.readyState === socket.OPEN) {
-      socket.send(chunk, { binary: true })
+function serializeUpgradeRequest(req) {
+  const lines = [`${req.method} ${req.url || '/'} HTTP/${req.httpVersion}`]
+  for (const [name, value] of Object.entries(req.headers)) {
+    if (Array.isArray(value)) {
+      for (const item of value) lines.push(`${name}: ${item}`)
+    } else if (value !== undefined) {
+      lines.push(`${name}: ${value}`)
     }
+  }
+  return `${lines.join('\r\n')}\r\n\r\n`
+}
+
+server.on('upgrade', (req, socket, head) => {
+  const upstream = net.connect({ host: p2pHost, port: p2pPort }, () => {
+    upstream.write(serializeUpgradeRequest(req))
+    if (head.length) upstream.write(head)
+    socket.pipe(upstream)
+    upstream.pipe(socket)
   })
 
   const closeBoth = () => {
-    try {
-      socket.close()
-    } catch {
-      // Ignore close races between websocket and TCP sides.
-    }
-    try {
-      upstream.destroy()
-    } catch {
-      // Ignore close races between websocket and TCP sides.
-    }
+    socket.destroy()
+    upstream.destroy()
   }
 
-  socket.on('close', closeBoth)
   socket.on('error', closeBoth)
-  upstream.on('close', closeBoth)
+  socket.on('close', closeBoth)
   upstream.on('error', closeBoth)
-})
-
-server.on('upgrade', (req, socket, head) => {
-  wss.handleUpgrade(req, socket, head, (ws) => {
-    wss.emit('connection', ws, req)
-  })
+  upstream.on('close', closeBoth)
 })
 
 server.listen(port, () => {
