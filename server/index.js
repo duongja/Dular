@@ -228,9 +228,11 @@ async function prepareBrowserOutboundChannel({ pubkey, fundingAmountBaseUnits, r
   let fundingStatus = null
 
   const abandonedPendingChannels = []
+  const abandonPendingErrors = []
+  let abandonablePendingChannels = pendingChannels.filter(isAbandonablePendingChannel)
   const shouldClearPending = outboundLiquidity < fundingAmountBaseUnits
-    && pendingChannels.length
-    && (replacePending || stalePendingChannels(pendingChannels).length === pendingChannels.length)
+    && abandonablePendingChannels.length
+    && (replacePending || stalePendingChannels(abandonablePendingChannels).length === abandonablePendingChannels.length)
 
   if (outboundLiquidity < fundingAmountBaseUnits && pendingChannels.length) {
     fundingStatus = await operatorFundingStatus(fundingAmountBaseUnits)
@@ -238,6 +240,7 @@ async function prepareBrowserOutboundChannel({ pubkey, fundingAmountBaseUnits, r
       return {
         connectedPeer,
         abandonedPendingChannels,
+        abandonPendingErrors,
         channelBootstrap: null,
         pendingChannel: existingPending,
         pendingChannels,
@@ -252,9 +255,13 @@ async function prepareBrowserOutboundChannel({ pubkey, fundingAmountBaseUnits, r
   }
 
   if (shouldClearPending) {
-    for (const channel of pendingChannels) {
-      await abandonFiberChannel(channel.channel_id)
-      abandonedPendingChannels.push(channel.channel_id)
+    for (const channel of abandonablePendingChannels) {
+      try {
+        await abandonFiberChannel(channel.channel_id)
+        abandonedPendingChannels.push(channel.channel_id)
+      } catch (error) {
+        abandonPendingErrors.push(`${channel.channel_id}: ${error.message || String(error)}`)
+      }
     }
     existing = await listChannelsByPeer(pubkey)
     readyChannels = readyRoutableBrowserChannels(existing.channels || [])
@@ -273,6 +280,7 @@ async function prepareBrowserOutboundChannel({ pubkey, fundingAmountBaseUnits, r
       return {
         connectedPeer,
         abandonedPendingChannels,
+        abandonPendingErrors,
         channelBootstrap: null,
         pendingChannel: null,
         pendingChannels: [],
@@ -304,6 +312,7 @@ async function prepareBrowserOutboundChannel({ pubkey, fundingAmountBaseUnits, r
   return {
     connectedPeer,
     abandonedPendingChannels,
+    abandonPendingErrors,
     channelBootstrap,
     pendingChannel: existingPending || null,
     pendingChannels,
@@ -312,7 +321,7 @@ async function prepareBrowserOutboundChannel({ pubkey, fundingAmountBaseUnits, r
     requiredOutboundLiquidity: fundingAmountBaseUnits,
     operatorFundingAddress: fundingStatus?.fundingAddress || '',
     operatorOnChainRUsd: fundingStatus?.onChainRUsd || null,
-    nextAction: readyChannel ? null : (channelBootstrap || existingPending ? 'accept_channel' : 'wait_for_channel_ready'),
+    nextAction: nextChannelAction({ readyChannel, channelBootstrap, pendingChannels }),
   }
 }
 
@@ -458,6 +467,28 @@ function stalePendingChannels(channels, maxAgeMs = 90_000) {
     const createdAt = channelCreatedAtMs(channel)
     return createdAt > 0 && now - createdAt > maxAgeMs
   })
+}
+
+function isCommittedPendingChannel(channel) {
+  const state = channelStateName(channel)
+  const flags = channel?.state?.state_flags || channel?.state_flags || ''
+  return Boolean(channel?.channel_outpoint)
+    || state === 'AwaitingTxSignatures'
+    || state === 'AwaitingChannelReady'
+    || String(flags).includes('TX_SIGNATURES_SENT')
+}
+
+function isAbandonablePendingChannel(channel) {
+  const state = channelStateName(channel)
+  return state
+    && state !== 'ChannelReady'
+    && !isCommittedPendingChannel(channel)
+}
+
+function nextChannelAction({ readyChannel, channelBootstrap, pendingChannels }) {
+  if (readyChannel) return null
+  if ((pendingChannels || []).some(isCommittedPendingChannel)) return 'wait_for_channel_ready'
+  return channelBootstrap || (pendingChannels || []).length ? 'accept_channel' : 'wait_for_channel_ready'
 }
 
 async function operatorFundingStatus(fundingAmountBaseUnits) {
@@ -1204,6 +1235,7 @@ app.post('/api/fiber/browser/seed-liquidity', requireAuth, asyncHandler(async (r
   const {
     connectedPeer,
     abandonedPendingChannels,
+    abandonPendingErrors,
     channelBootstrap,
     pendingChannel,
     pendingChannels,
@@ -1221,6 +1253,7 @@ app.post('/api/fiber/browser/seed-liquidity', requireAuth, asyncHandler(async (r
       connected: true,
       peerAddress: connectedPeer.address,
       abandonedPendingChannels,
+      abandonPendingErrors,
       channelBootstrap,
       pendingChannel,
       pendingChannels,
@@ -1242,6 +1275,7 @@ app.post('/api/fiber/browser/seed-liquidity', requireAuth, asyncHandler(async (r
     connected: true,
     peerAddress: connectedPeer.address,
     abandonedPendingChannels,
+    abandonPendingErrors,
     channelBootstrap,
     pendingChannels,
     readyChannel,
@@ -1270,6 +1304,7 @@ app.post('/api/fiber/browser/prepare-receive-route', requireAuth, asyncHandler(a
     connected: true,
     peerAddress: prepared.connectedPeer.address,
     abandonedPendingChannels: prepared.abandonedPendingChannels,
+    abandonPendingErrors: prepared.abandonPendingErrors,
     channelBootstrap: prepared.channelBootstrap,
     pendingChannel: prepared.pendingChannel,
     pendingChannels: prepared.pendingChannels,

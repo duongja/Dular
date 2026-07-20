@@ -899,6 +899,7 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
               {bootstrap.acceptedChannels?.length > 0 && <ProofRow label="Accepted channels" value={bootstrap.acceptedChannels.map((channel) => channel.channelId).join(', ')} />}
               {bootstrap.pendingChannels?.length > 0 && <ProofRow label="Pending channels" value={bootstrap.pendingChannels.map((channel) => `${channel.channel_id}:${channelStateName(channel)}`).join(', ')} />}
               {bootstrap.abandonedPendingChannels?.length > 0 && <ProofRow label="Cleared stale channels" value={bootstrap.abandonedPendingChannels.join(', ')} />}
+              {bootstrap.abandonPendingErrors?.length > 0 && <ProofRow label="Cleanup notes" value={bootstrap.abandonPendingErrors.join(' | ')} />}
               {bootstrap.outboundLiquidity && <ProofRow label="Operator outbound" value={formatRUsd(bootstrap.outboundLiquidity)} />}
               {bootstrap.requiredOutboundLiquidity && <ProofRow label="Required outbound" value={formatRUsd(bootstrap.requiredOutboundLiquidity)} />}
               {bootstrap.operatorOnChainRUsd !== undefined && bootstrap.operatorOnChainRUsd !== null && <ProofRow label="Operator on-chain RUSD" value={formatRUsd(bootstrap.operatorOnChainRUsd)} />}
