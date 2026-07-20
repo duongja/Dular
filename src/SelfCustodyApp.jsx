@@ -509,6 +509,10 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
   const [loading, setLoading] = useState(false)
   const [proof, setProof] = useState(null)
   const operatorPubkey = operatorInfo?.operator?.pubkey || ''
+  const fundedPendingChannel = proof?.fundedPendingChannel || proof?.pendingChannels?.find((channel) => channel.channel_outpoint)
+  const canClearTemporaryChannel = (proof?.opened?.temporary_channel_id || proof?.pendingChannels?.length > 0)
+    && !proof?.readyChannel
+    && !fundedPendingChannel
 
   async function submit(event) {
     event.preventDefault()
@@ -573,30 +577,47 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
       })
       setProof((current) => ({ ...(current || {}), ...initialDiagnostics }))
 
-      setStatus({ type: 'warning', message: 'Channel negotiation started. Keep this tab open while Fiber prepares the funding transaction.' })
+      setStatus({ type: 'warning', message: 'Channel funding started. Keep this tab open while CKB confirms the channel.' })
       const ready = await waitForSelfFundedChannel(operatorPubkey, fundingAmountBaseUnits, (snapshot) => {
         setProof((current) => ({ ...(current || {}), ...snapshot }))
       })
-      const finalDiagnostics = await collectSelfChannelDiagnostics({
-        browserPubkey: nodeInfo.pubkey,
-        operatorPubkey,
-        temporaryChannelId: opened.temporary_channel_id,
-      })
-      setProof((current) => ({ ...(current || {}), ...finalDiagnostics }))
+      let finalChannels = await browserListChannels()
+      let finalRoute = findSenderRouteChannel(finalChannels, operatorPubkey, fundingAmountBaseUnits)
+      let finalChannel = ready.channel || finalRoute.channel
 
-      if (ready.channel?.channel_id) {
+      if (finalChannel?.channel_id) {
         try {
-          await browserUpdateChannel({ channelId: ready.channel.channel_id, tlcFeeProportionalMillionths: '0x0' })
+          await browserUpdateChannel({ channelId: finalChannel.channel_id, tlcFeeProportionalMillionths: '0x0' })
         } catch {
           // The channel can still be usable if fee update races with readiness.
         }
       }
       await onRefreshNetwork({ silent: true })
+      finalChannels = await browserListChannels()
+      finalRoute = findSenderRouteChannel(finalChannels, operatorPubkey, fundingAmountBaseUnits)
+      finalChannel = finalChannel || finalRoute.channel
+      const finalPendingChannels = pendingOperatorChannels(finalChannels, operatorPubkey)
+      const finalFundedPending = finalPendingChannels.find((channel) => channel.channel_outpoint)
+      const finalDiagnostics = await collectSelfChannelDiagnostics({
+        browserPubkey: nodeInfo.pubkey,
+        operatorPubkey,
+        temporaryChannelId: opened.temporary_channel_id,
+      })
+      setProof((current) => ({
+        ...(current || {}),
+        ...finalDiagnostics,
+        readyChannel: finalChannel || current?.readyChannel,
+        latestLocalBalance: finalRoute.largestLocalBalance.toString(),
+        pendingChannels: finalChannel ? [] : finalPendingChannels,
+        senderRouteDiagnostics: describeSenderRouteChannels(finalChannels, operatorPubkey),
+      }))
       setStatus({
-        type: ready.channel ? 'success' : 'warning',
-        message: ready.channel
+        type: finalChannel ? 'success' : 'warning',
+        message: finalChannel
           ? `${formatRUsd(fundingAmountBaseUnits)} self-funded channel is ready. You can now send from this wallet.`
-          : 'The self-funded channel is still negotiating and no funding outpoint is visible yet. Clear the temporary channel and retry if this does not change.',
+          : finalFundedPending
+            ? 'The funding transaction is visible on-chain. Keep this tab open and tap Sync shortly; the channel should become ready after CKB confirmation.'
+            : 'The self-funded channel is still negotiating and no funding outpoint is visible yet. Clear the temporary channel and retry if this does not change.',
       })
     } catch (error) {
       setStatus({ type: 'error', message: error.message || 'Could not open self-funded channel.' })
@@ -669,6 +690,7 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
           {proof.opened?.temporary_channel_id && <ProofRow label="Temporary channel" value={proof.opened.temporary_channel_id} />}
           {proof.readyChannel?.channel_id && <ProofRow label="Ready channel" value={proof.readyChannel.channel_id} />}
           {proof.readyChannel?.channel_outpoint && <ProofRow label="Funding outpoint" value={proof.readyChannel.channel_outpoint} />}
+          {fundedPendingChannel?.channel_outpoint && <ProofRow label="Funding transaction" value={fundedPendingChannel.channel_outpoint} />}
           {proof.requestedAmountBaseUnits && <ProofRow label="Requested amount" value={formatRUsd(proof.requestedAmountBaseUnits)} />}
           {proof.walletCapacity && <ProofRow label="Detected CKB" value={proof.walletCapacity} />}
           {proof.walletRUsdBaseUnits && <ProofRow label="Detected RUSD" value={formatRUsd(proof.walletRUsdBaseUnits)} />}
@@ -702,8 +724,8 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
           {proof.clearedOperatorChannels?.errors?.length > 0 && <ProofRow label="Operator cleanup errors" value={proof.clearedOperatorChannels.errors.join(' | ')} />}
           {proof.clearedChannels?.length > 0 && <ProofRow label="Cleared stale channels" value={proof.clearedChannels.join(', ')} />}
           {proof.clearedManually && <ProofRow label="Cleared manually" value={proof.clearedManually} />}
-          {proof.pendingChannels?.length > 0 && <ProofRow label="Pending channels" value={proof.pendingChannels.map((channel) => `${channel.channel_id}:${channelStateName(channel)}`).join(', ')} />}
-          {(proof.opened?.temporary_channel_id || proof.pendingChannels?.length > 0) && !proof.readyChannel && (
+          {proof.pendingChannels?.length > 0 && <ProofRow label="Pending channels" value={proof.pendingChannels.map((channel) => `${channel.channel_id}:${channelStateName(channel)}${channel.channel_outpoint ? ':funding-visible' : ''}`).join(', ')} />}
+          {canClearTemporaryChannel && (
             <button type="button" className="secondaryBtn fullWidth" onClick={clearTemporaryChannel} disabled={loading}>
               Clear temporary channel
             </button>
@@ -976,18 +998,16 @@ async function waitForSelfFundedChannel(operatorPubkey, requiredBaseUnits, onUpd
   let latestChannels = null
   let senderRoute = null
 
-  for (let attempt = 0; attempt < 12; attempt += 1) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
     if (attempt > 0) await wait(5000)
     latestChannels = await browserListChannels()
     senderRoute = findSenderRouteChannel(latestChannels, operatorPubkey, requiredBaseUnits)
-    const operator = normalizePubkey(operatorPubkey)
-    const pendingChannels = (latestChannels.channels || []).filter((channel) => (
-      normalizePubkey(channel.pubkey) === operator && !isReadyChannel(channel)
-    ))
+    const pendingChannels = pendingOperatorChannels(latestChannels, operatorPubkey)
     onUpdate?.({
       readyChannel: senderRoute.channel,
       latestLocalBalance: senderRoute.largestLocalBalance.toString(),
       pendingChannels,
+      fundedPendingChannel: pendingChannels.find((channel) => channel.channel_outpoint) || null,
       senderRouteDiagnostics: describeSenderRouteChannels(latestChannels, operatorPubkey),
     })
     if (senderRoute.channel) break
@@ -998,6 +1018,13 @@ async function waitForSelfFundedChannel(operatorPubkey, requiredBaseUnits, onUpd
     channel: senderRoute?.channel || null,
     diagnostics: describeSenderRouteChannels(latestChannels || { channels: [] }, operatorPubkey),
   }
+}
+
+function pendingOperatorChannels(channelsResult, operatorPubkey) {
+  const operator = normalizePubkey(operatorPubkey)
+  return (channelsResult?.channels || []).filter((channel) => (
+    normalizePubkey(channel.pubkey) === operator && !isReadyChannel(channel)
+  ))
 }
 
 async function acceptPendingChannel(seedResult) {
