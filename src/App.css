@@ -53,7 +53,25 @@ button {
   transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, opacity 0.2s ease;
 }
 
+a.primaryBtn,
+a.secondaryBtn,
+a.ghostBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-weight: 800;
+  text-decoration: none;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, opacity 0.2s ease;
+}
+
 button:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+a.primaryBtn:hover,
+a.secondaryBtn:hover,
+a.ghostBtn:hover {
   transform: translateY(-1px);
 }
 
@@ -863,6 +881,28 @@ button:disabled {
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid var(--line);
+}
+
+.faucetHelpCard {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(135deg, rgba(229, 242, 255, 0.82), rgba(255, 255, 255, 0.78));
+  border: 1px solid rgba(33, 118, 174, 0.16);
+}
+
+.faucetHelpCard h3 {
+  color: var(--ink);
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.faucetHelpCard p:not(.eyebrow) {
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .requestCard,

@@ -21,6 +21,9 @@ import {
 import './App.css'
 
 const RUSD_BASE = 100000000n
+const CKB_TESTNET_FAUCET_URL = 'https://faucet.nervos.org/'
+const RUSD_TESTNET_FAUCET_URL = 'https://testnet0815.stablepp.xyz/stablecoin'
+const JOYID_TESTNET_URL = 'https://testnet.joyid.dev/'
 
 function token() {
   return localStorage.getItem('dular_token') || ''
@@ -291,6 +294,7 @@ function SetupCard({ phone, onCreate, onUnlock, hasExistingWallet, loading, stat
 function SelfCustodyDashboard({
   user,
   nodeInfo,
+  operatorInfo,
   peers,
   channels,
   funding,
@@ -401,7 +405,7 @@ function SelfCustodyDashboard({
             <div className="buttonRow wrapButtons">
               <a
                 className="secondaryBtn"
-                href="https://faucet.nervos.org/"
+                href={CKB_TESTNET_FAUCET_URL}
                 target="_blank"
                 rel="noreferrer"
               >
@@ -409,7 +413,12 @@ function SelfCustodyDashboard({
               </a>
               {walletAddress && <CopyButton value={walletAddress} label="Copy address" />}
             </div>
-            <TopUpCard nodeInfo={nodeInfo} onRefreshNetwork={onRefreshNetwork} />
+            <TopUpCard
+              nodeInfo={nodeInfo}
+              walletAddress={walletAddress}
+              operatorInfo={operatorInfo}
+              onRefreshNetwork={onRefreshNetwork}
+            />
           </section>
 
           <section id="receive" className="contentCard mobileActionCard">
@@ -473,11 +482,12 @@ function SelfCustodyDashboard({
   )
 }
 
-function TopUpCard({ nodeInfo, onRefreshNetwork }) {
+function TopUpCard({ nodeInfo, walletAddress, operatorInfo, onRefreshNetwork }) {
   const [amount, setAmount] = useState('1.00')
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(false)
   const [proof, setProof] = useState(null)
+  const operatorFundingAddress = operatorInfo?.fundingAddress || ''
 
   async function submit(event) {
     event.preventDefault()
@@ -551,6 +561,26 @@ function TopUpCard({ nodeInfo, onRefreshNetwork }) {
           {loading ? 'Adding funds...' : 'Add test RUSD'}
         </button>
       </form>
+      <div className="faucetHelpCard">
+        <p className="eyebrow">Manual faucet path</p>
+        <h3>Need more RUSD?</h3>
+        <p>
+          The automatic top-up uses Dular's hosted testnet operator to open and credit browser channels. If it says the operator needs free RUSD cells, claim testnet RUSD with JoyID and send it to the operator funding address below.
+        </p>
+        <div className="buttonRow wrapButtons">
+          <a className="secondaryBtn" href={RUSD_TESTNET_FAUCET_URL} target="_blank" rel="noreferrer">
+            Open RUSD faucet
+          </a>
+          <a className="ghostBtn" href={JOYID_TESTNET_URL} target="_blank" rel="noreferrer">
+            Open JoyID testnet
+          </a>
+          {operatorFundingAddress && <CopyButton value={operatorFundingAddress} label="Copy operator address" />}
+        </div>
+        <ProofDrawer summary="Funding addresses">
+          <ProofRow label="Operator RUSD address" value={operatorFundingAddress || 'Connect wallet first'} />
+          <ProofRow label="Your wallet CKB address" value={walletAddress || 'Loading...'} />
+        </ProofDrawer>
+      </div>
       <Status state={status} />
       {proof && (
         <ProofDrawer summary="Top-up proof">
@@ -1036,6 +1066,7 @@ export default function SelfCustodyApp() {
   const [walletStatus, setWalletStatus] = useState('idle')
   const [setupStatus, setSetupStatus] = useState(null)
   const [nodeInfo, setNodeInfo] = useState(null)
+  const [operatorInfo, setOperatorInfo] = useState(null)
   const [peers, setPeers] = useState({ peers: [] })
   const [channels, setChannels] = useState({ channels: [] })
   const [funding, setFunding] = useState(null)
@@ -1141,6 +1172,7 @@ export default function SelfCustodyApp() {
 
     try {
       const operator = await api('/fiber/operator')
+      setOperatorInfo(operator)
       const addrType = operator.addrType || (operator.wsAddress?.includes('/wss') ? 'wss' : 'ws')
       await browserConnectPeer({ address: operator.wsAddress, pubkey: operator.operator?.pubkey, addrType })
     } catch (error) {
@@ -1226,6 +1258,7 @@ export default function SelfCustodyApp() {
     runtimeRef.current = null
     localStorage.removeItem('dular_token')
     setNodeInfo(null)
+    setOperatorInfo(null)
     setPeers({ peers: [] })
     setChannels({ channels: [] })
     setFunding(null)
@@ -1239,6 +1272,7 @@ export default function SelfCustodyApp() {
     await stopBrowserFiber()
     runtimeRef.current = null
     setNodeInfo(null)
+    setOperatorInfo(null)
     setPeers({ peers: [] })
     setChannels({ channels: [] })
     setFunding(null)
@@ -1254,6 +1288,7 @@ export default function SelfCustodyApp() {
     await deleteWalletRecord(user.phone)
     setWalletRecord(null)
     setNodeInfo(null)
+    setOperatorInfo(null)
     setPeers({ peers: [] })
     setChannels({ channels: [] })
     setFunding(null)
@@ -1370,6 +1405,7 @@ export default function SelfCustodyApp() {
       onLock={lockWallet}
       onSignOut={signOut}
       onRefreshNetwork={refreshNetwork}
+      operatorInfo={operatorInfo}
     />
   )
 }
