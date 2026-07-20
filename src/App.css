@@ -909,7 +909,8 @@ button:disabled {
   border-top: 1px solid var(--line);
 }
 
-.faucetHelpCard {
+.faucetHelpCard,
+.routeHelpCard {
   display: grid;
   gap: 0.75rem;
   margin-top: 1rem;
@@ -920,13 +921,21 @@ button:disabled {
   border: 1px solid rgba(33, 118, 174, 0.16);
 }
 
-.faucetHelpCard h3 {
+.routeHelpCard {
+  background:
+    linear-gradient(135deg, rgba(255, 243, 213, 0.86), rgba(255, 255, 255, 0.8));
+  border-color: rgba(180, 112, 20, 0.2);
+}
+
+.faucetHelpCard h3,
+.routeHelpCard h3 {
   color: var(--ink);
   font-size: 1.05rem;
   letter-spacing: -0.02em;
 }
 
-.faucetHelpCard p:not(.eyebrow) {
+.faucetHelpCard p:not(.eyebrow),
+.routeHelpCard p:not(.eyebrow) {
   color: var(--muted);
   line-height: 1.5;
 }

@@ -758,6 +758,7 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(false)
   const [bootstrap, setBootstrap] = useState(null)
+  const needsOperatorRUsd = bootstrap?.nextAction === 'fund_operator_rusd'
 
   async function prepareReceivingRoute({ manageLoading = true } = {}) {
     if (!nodeInfo?.pubkey) return
@@ -872,6 +873,22 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
               {loading ? 'Preparing...' : 'Prepare again'}
             </button>
           </div>
+          {needsOperatorRUsd && (
+            <div className="routeHelpCard">
+              <p className="eyebrow">Route liquidity needed</p>
+              <h3>Fund the Dular route with RUSD</h3>
+              <p>
+                This receive request needs {formatRUsd(bootstrap.requiredOutboundLiquidity || '0')} of operator RUSD liquidity.
+                Send testnet RUSD, not CKB, to the operator address, then tap Prepare again.
+              </p>
+              <div className="buttonRow wrapButtons">
+                <a className="secondaryBtn" href={RUSD_TESTNET_FAUCET_URL} target="_blank" rel="noreferrer">
+                  Open RUSD faucet
+                </a>
+                <CopyButton value={bootstrap.operatorFundingAddress} label="Copy operator address" />
+              </div>
+            </div>
+          )}
           {bootstrap && (
             <ProofDrawer summary="Receive proof">
               <ProofRow label="Invoice" value={invoice.invoice_address} />
