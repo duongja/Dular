@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   browserAcceptChannel,
+  browserAbandonChannel,
   browserConnectPeer,
   browserCreateInvoice,
   browserGetPayment,
   browserListChannels,
   browserListPeers,
   browserNodeInfo,
+  browserOpenRUsdChannel,
   browserSendPayment,
   canUseBrowserFiber,
   startBrowserFiber,
   stopBrowserFiber,
+  browserUpdateChannel,
 } from './lib/fiberBrowserNode.js'
 import {
   createWalletRecord,
@@ -416,6 +419,7 @@ function SelfCustodyDashboard({
             <TopUpCard
               nodeInfo={nodeInfo}
               walletAddress={walletAddress}
+              funding={funding}
               operatorInfo={operatorInfo}
               onRefreshNetwork={onRefreshNetwork}
             />
@@ -482,26 +486,21 @@ function SelfCustodyDashboard({
   )
 }
 
-function TopUpCard({ nodeInfo, walletAddress, operatorInfo, onRefreshNetwork }) {
+function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNetwork }) {
   const [amount, setAmount] = useState('1.00')
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(false)
   const [proof, setProof] = useState(null)
-  const operatorFundingAddress = operatorInfo?.fundingAddress || ''
-
-  function showOperatorFundingRequired(result, fundingAmountBaseUnits) {
-    if (result.nextAction !== 'fund_operator_rusd') return false
-    setStatus({
-      type: 'warning',
-      message: `Dular's testnet operator needs RUSD liquidity before it can credit this wallet. Send at least ${formatRUsd(fundingAmountBaseUnits)} from the RUSD faucet to the operator address below, then tap Add test RUSD again.`,
-    })
-    return true
-  }
+  const operatorPubkey = operatorInfo?.operator?.pubkey || ''
 
   async function submit(event) {
     event.preventDefault()
     if (!nodeInfo?.pubkey) {
       setStatus({ type: 'error', message: 'Wallet is still starting. Wait a few seconds and try again.' })
+      return
+    }
+    if (!operatorPubkey) {
+      setStatus({ type: 'error', message: 'Dular operator is not connected yet. Tap Sync and try again.' })
       return
     }
 
@@ -510,49 +509,56 @@ function TopUpCard({ nodeInfo, walletAddress, operatorInfo, onRefreshNetwork }) 
     setProof(null)
 
     try {
-      const fundingAmountBaseUnits = toBaseUnits(amount).toString()
-      setStatus({ type: 'warning', message: 'Creating a secure receive request for your top-up...' })
-      const invoice = await browserCreateInvoice({
-        amountHex: toBaseUnitsHex(amount),
-        description: 'Dular test RUSD top-up',
+      const fundingAmountBaseUnits = toBaseUnits(amount)
+      setStatus({ type: 'warning', message: 'Checking faucet funds on your wallet address...' })
+      const lockArg = getFundingLockArg(nodeInfo)
+      const latestFunding = lockArg
+        ? await api('/fiber/browser/address', {
+          method: 'POST',
+          body: JSON.stringify({ lockArg }),
+        })
+        : funding
+      const walletRUsdBaseUnits = BigInt(String(latestFunding?.rusdBaseUnits || 0))
+      setProof({
+        walletCapacity: latestFunding?.capacity,
+        walletRUsdBaseUnits: latestFunding?.rusdBaseUnits || '0',
+        operatorPubkey,
+        requestedAmountBaseUnits: fundingAmountBaseUnits.toString(),
       })
-      setProof({ invoice })
-
-      let result = await requestSeedLiquidity(invoice.invoice_address, nodeInfo.pubkey, nodeInfo.addresses || [], { fundingAmountBaseUnits })
-      setProof((current) => ({ ...(current || {}), ...result, invoice }))
-      if (showOperatorFundingRequired(result, fundingAmountBaseUnits)) return
-
-      if (result.nextAction === 'accept_channel') {
-        setStatus({ type: 'warning', message: 'Approving the incoming Fiber channel on this device...' })
-        let accepted
-        try {
-          accepted = await acceptPendingChannel(result)
-        } catch (error) {
-          if (!isMissingTempChannelError(error)) throw error
-          setStatus({ type: 'warning', message: 'Refreshing a stale channel request and trying again...' })
-          result = await requestSeedLiquidity(invoice.invoice_address, nodeInfo.pubkey, nodeInfo.addresses || [], { replacePending: true, fundingAmountBaseUnits })
-          setProof((current) => ({ ...(current || {}), ...result, invoice }))
-          accepted = await acceptPendingChannel(result)
-        }
-        if (!accepted.length) {
-          throw new Error('No incoming channel reached this wallet yet. Keep this tab open, sync the wallet, then try again.')
-        }
-        setStatus({ type: 'warning', message: 'Channel accepted. Waiting for the RUSD top-up to finish...' })
-        await onRefreshNetwork({ silent: true })
-        result = await retrySeedLiquidity(invoice.invoice_address, nodeInfo.pubkey, nodeInfo.addresses || [], { fundingAmountBaseUnits })
-        setProof((current) => ({ ...(current || {}), ...result, acceptedChannels: accepted, invoice }))
-        if (showOperatorFundingRequired(result, fundingAmountBaseUnits)) return
+      if (walletRUsdBaseUnits < fundingAmountBaseUnits) {
+        throw new Error(`This wallet only has ${formatRUsd(walletRUsdBaseUnits)} on-chain. Fund at least ${formatRUsd(fundingAmountBaseUnits)} RUSD to your wallet address first.`)
       }
 
+      setStatus({ type: 'warning', message: 'Opening a self-funded Fiber channel from this browser wallet...' })
+      const clearedChannels = await clearStaleOperatorChannels(operatorPubkey)
+      const opened = await browserOpenRUsdChannel({
+        pubkey: operatorPubkey,
+        amountHex: toBaseUnitsHex(amount),
+        isPublic: true,
+      })
+      setProof((current) => ({ ...(current || {}), opened, clearedChannels }))
+
+      setStatus({ type: 'warning', message: 'Funding transaction submitted. Keep this tab open while the channel becomes ready.' })
+      const ready = await waitForSelfFundedChannel(operatorPubkey, fundingAmountBaseUnits, (snapshot) => {
+        setProof((current) => ({ ...(current || {}), ...snapshot }))
+      })
+
+      if (ready.channel?.channel_id) {
+        try {
+          await browserUpdateChannel({ channelId: ready.channel.channel_id, tlcFeeProportionalMillionths: '0x0' })
+        } catch {
+          // The channel can still be usable if fee update races with readiness.
+        }
+      }
       await onRefreshNetwork({ silent: true })
       setStatus({
-        type: result.payment ? 'success' : 'warning',
-        message: result.payment
-          ? `${formatRUsd(fundingAmountBaseUnits)} added. You can now send from this wallet.`
-          : 'The channel is accepted, but the RUSD top-up is still settling. Keep this wallet open and sync again shortly.',
+        type: ready.channel ? 'success' : 'warning',
+        message: ready.channel
+          ? `${formatRUsd(fundingAmountBaseUnits)} self-funded channel is ready. You can now send from this wallet.`
+          : 'The self-funded channel was submitted but is not ready yet. Keep this tab open and tap Sync shortly.',
       })
     } catch (error) {
-      setStatus({ type: 'error', message: error.message || 'Could not add test RUSD.' })
+      setStatus({ type: 'error', message: error.message || 'Could not open self-funded channel.' })
     } finally {
       setLoading(false)
     }
@@ -562,49 +568,53 @@ function TopUpCard({ nodeInfo, walletAddress, operatorInfo, onRefreshNetwork }) 
     <div className="topUpPanel">
       <form onSubmit={submit}>
         <div className="formGroup">
-          <label>Amount to add</label>
+          <label>Channel amount</label>
           <div className="amountField">
             <input value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" placeholder="1.00" required />
             <span>RUSD</span>
           </div>
         </div>
         <button type="submit" className="primaryBtn fullWidth" disabled={loading || !nodeInfo?.pubkey}>
-          {loading ? 'Adding funds...' : 'Add test RUSD'}
+          {loading ? 'Opening channel...' : 'Open self-funded channel'}
         </button>
       </form>
       <div className="faucetHelpCard">
-        <p className="eyebrow">Manual faucet path</p>
-        <h3>Need more RUSD?</h3>
+        <p className="eyebrow">Self-custody funding</p>
+        <h3>Fund your own wallet first</h3>
         <p>
-          The automatic top-up uses Dular's hosted testnet operator to open and credit browser channels. If it says the operator needs free RUSD cells, claim testnet RUSD with JoyID and send it to the operator funding address below.
+          Claim testnet CKB and RUSD, then send both to your wallet address. Dular will open the Fiber channel from this browser wallet, using your own key.
         </p>
         <div className="buttonRow wrapButtons">
+          <a className="secondaryBtn" href={CKB_TESTNET_FAUCET_URL} target="_blank" rel="noreferrer">
+            Open CKB faucet
+          </a>
           <a className="secondaryBtn" href={RUSD_TESTNET_FAUCET_URL} target="_blank" rel="noreferrer">
             Open RUSD faucet
           </a>
           <a className="ghostBtn" href={JOYID_TESTNET_URL} target="_blank" rel="noreferrer">
             Open JoyID testnet
           </a>
-          {operatorFundingAddress && <CopyButton value={operatorFundingAddress} label="Copy operator address" />}
+          {walletAddress && <CopyButton value={walletAddress} label="Copy wallet address" />}
         </div>
         <ProofDrawer summary="Funding addresses">
-          <ProofRow label="Operator RUSD address" value={operatorFundingAddress || 'Connect wallet first'} />
-          <ProofRow label="Your wallet CKB address" value={walletAddress || 'Loading...'} />
+          <ProofRow label="Your CKB/RUSD address" value={walletAddress || 'Loading...'} />
+          <ProofRow label="On-chain CKB" value={funding?.capacity || 'Tap Sync after funding'} />
+          <ProofRow label="On-chain RUSD" value={funding?.rusdBaseUnits ? formatRUsd(funding.rusdBaseUnits) : 'Tap Sync after funding'} />
+          <ProofRow label="Channel peer" value={operatorPubkey || 'Connecting'} />
         </ProofDrawer>
       </div>
       <Status state={status} />
       {proof && (
-        <ProofDrawer summary="Top-up proof">
-          {proof.invoice?.invoice_address && <ProofRow label="Invoice" value={proof.invoice.invoice_address} />}
-          {proof.invoice?.payment_hash && <ProofRow label="Payment hash" value={proof.invoice.payment_hash} />}
-          {proof.channelBootstrap?.temporary_channel_id && <ProofRow label="Bootstrap channel" value={proof.channelBootstrap.temporary_channel_id} />}
+        <ProofDrawer summary="Self-funded channel proof">
+          {proof.opened?.temporary_channel_id && <ProofRow label="Temporary channel" value={proof.opened.temporary_channel_id} />}
           {proof.readyChannel?.channel_id && <ProofRow label="Ready channel" value={proof.readyChannel.channel_id} />}
-          {proof.payment?.payment_hash && <ProofRow label="Operator payment" value={proof.payment.payment_hash} />}
-          {proof.acceptedChannels?.length > 0 && <ProofRow label="Accepted channels" value={proof.acceptedChannels.map((channel) => channel.channelId).join(', ')} />}
+          {proof.readyChannel?.channel_outpoint && <ProofRow label="Funding outpoint" value={proof.readyChannel.channel_outpoint} />}
+          {proof.requestedAmountBaseUnits && <ProofRow label="Requested amount" value={formatRUsd(proof.requestedAmountBaseUnits)} />}
+          {proof.walletCapacity && <ProofRow label="Detected CKB" value={proof.walletCapacity} />}
+          {proof.walletRUsdBaseUnits && <ProofRow label="Detected RUSD" value={formatRUsd(proof.walletRUsdBaseUnits)} />}
+          {proof.latestLocalBalance && <ProofRow label="Spendable in channel" value={formatRUsd(proof.latestLocalBalance)} />}
+          {proof.clearedChannels?.length > 0 && <ProofRow label="Cleared stale channels" value={proof.clearedChannels.join(', ')} />}
           {proof.pendingChannels?.length > 0 && <ProofRow label="Pending channels" value={proof.pendingChannels.map((channel) => `${channel.channel_id}:${channelStateName(channel)}`).join(', ')} />}
-          {proof.outboundLiquidity && <ProofRow label="Operator outbound" value={formatRUsd(proof.outboundLiquidity)} />}
-          {proof.operatorOnChainRUsd !== undefined && proof.operatorOnChainRUsd !== null && <ProofRow label="Operator on-chain RUSD" value={formatRUsd(proof.operatorOnChainRUsd)} />}
-          {proof.operatorFundingAddress && <ProofRow label="Operator funding address" value={proof.operatorFundingAddress} />}
         </ProofDrawer>
       )}
     </div>
@@ -702,6 +712,9 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
 
   return (
     <>
+      <p className="muted receiveNote">
+        Self-funded channels give you send capacity. Receiving through the Dular route still needs inbound liquidity to this wallet.
+      </p>
       <form onSubmit={submit}>
         <div className="formGroup">
           <label>Amount to receive</label>
@@ -752,13 +765,6 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
   )
 }
 
-async function requestSeedLiquidity(invoice, pubkey, addresses, options = {}) {
-  return api('/fiber/browser/seed-liquidity', {
-    method: 'POST',
-    body: JSON.stringify({ invoice, pubkey, addresses, ...options }),
-  })
-}
-
 async function requestReceiveRoute(pubkey, addresses, options = {}) {
   return api('/fiber/browser/prepare-receive-route', {
     method: 'POST',
@@ -773,16 +779,6 @@ async function requestInvoiceRoute(invoice) {
   })
 }
 
-async function retrySeedLiquidity(invoice, pubkey, addresses, options = {}) {
-  let result = null
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    if (attempt > 0) await wait(5000)
-    result = await requestSeedLiquidity(invoice, pubkey, addresses, options)
-    if (result.payment || result.readyChannel) return result
-  }
-  return result
-}
-
 async function retryReceiveRoute(pubkey, addresses, options = {}) {
   let result = null
   for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -791,6 +787,67 @@ async function retryReceiveRoute(pubkey, addresses, options = {}) {
     if (result.readyChannel || result.hopHints?.length) return result
   }
   return result
+}
+
+function channelCreatedAtMs(channel) {
+  const raw = channel?.created_at || channel?.createdAt
+  if (!raw) return 0
+  try {
+    return Number(BigInt(raw))
+  } catch {
+    return 0
+  }
+}
+
+async function clearStaleOperatorChannels(operatorPubkey) {
+  const operator = normalizePubkey(operatorPubkey)
+  const channels = await browserListChannels()
+  const now = Date.now()
+  const staleChannels = (channels.channels || []).filter((channel) => {
+    if (normalizePubkey(channel.pubkey) !== operator) return false
+    if (isReadyChannel(channel)) return false
+    const createdAt = channelCreatedAtMs(channel)
+    return createdAt === 0 || now - createdAt > 90_000
+  })
+
+  const cleared = []
+  for (const channel of staleChannels) {
+    try {
+      await browserAbandonChannel(channel.channel_id)
+      cleared.push(channel.channel_id)
+    } catch {
+      // Best-effort cleanup. Fiber may already have moved or removed the channel.
+    }
+  }
+  return cleared
+}
+
+async function waitForSelfFundedChannel(operatorPubkey, requiredBaseUnits, onUpdate) {
+  let latestChannels = null
+  let senderRoute = null
+
+  for (let attempt = 0; attempt < 36; attempt += 1) {
+    if (attempt > 0) await wait(5000)
+    latestChannels = await browserListChannels()
+    senderRoute = findSenderRouteChannel(latestChannels, operatorPubkey, requiredBaseUnits)
+    const operator = normalizePubkey(operatorPubkey)
+    const pendingChannels = (latestChannels.channels || []).filter((channel) => (
+      normalizePubkey(channel.pubkey) === operator && !isReadyChannel(channel)
+    ))
+    onUpdate?.({
+      readyChannel: senderRoute.channel,
+      latestLocalBalance: senderRoute.largestLocalBalance.toString(),
+      pendingChannels,
+      senderRouteDiagnostics: describeSenderRouteChannels(latestChannels, operatorPubkey),
+    })
+    if (senderRoute.channel) break
+  }
+
+  return {
+    latestChannels,
+    channel: senderRoute?.channel || null,
+    diagnostics: describeSenderRouteChannels(latestChannels || { channels: [] }, operatorPubkey),
+  }
 }
 
 async function acceptPendingChannel(seedResult) {

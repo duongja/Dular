@@ -126,6 +126,27 @@ export async function browserAcceptChannel({ temporaryChannelId, fundingAmountHe
   })
 }
 
+export async function browserOpenRUsdChannel({ pubkey, amountHex, isPublic = true }) {
+  return getBrowserFiber().openChannel({
+    pubkey,
+    funding_amount: amountHex,
+    public: isPublic,
+    funding_udt_type_script: RUSD_TYPE_SCRIPT,
+    tlc_fee_proportional_millionths: '0x0',
+  })
+}
+
+export async function browserAbandonChannel(channelId) {
+  return getBrowserFiber().abandonChannel({ channel_id: channelId })
+}
+
+export async function browserUpdateChannel({ channelId, tlcFeeProportionalMillionths = '0x0' }) {
+  return getBrowserFiber().updateChannel({
+    channel_id: channelId,
+    tlc_fee_proportional_millionths: tlcFeeProportionalMillionths,
+  })
+}
+
 export async function browserConnectPeer({ address, pubkey, addrType = 'ws' }) {
   return getBrowserFiber().connectPeer({
     ...(address ? { address } : {}),

@@ -778,11 +778,18 @@ app.post('/api/fiber/browser/address', requireAuth, asyncHandler(async (req, res
   if (!/^0x[0-9a-f]{40}$/.test(lockArg)) {
     throw new Error('A valid secp256k1 lock arg is required')
   }
-  const [address, capacity] = await Promise.all([
-    lockArgToAddress(lockArg),
+  const [address, capacity, rusdBaseUnits] = await Promise.all([
+    Promise.resolve(lockArgToAddress(lockArg)),
     capacityByLockArg(lockArg),
+    udtAmountByLockArg(lockArg, RUSD_TYPE_SCRIPT),
   ])
-  res.json({ ok: true, address, lockArg, capacity })
+  res.json({
+    ok: true,
+    address,
+    lockArg,
+    capacity,
+    rusdBaseUnits: rusdBaseUnits.toString(),
+  })
 }))
 
 app.post('/api/fiber/browser/fund-ckb', requireAuth, asyncHandler(async (req, res) => {
