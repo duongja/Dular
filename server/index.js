@@ -45,6 +45,10 @@ import {
 
 const app = express()
 const execFileAsync = promisify(execFile)
+const CKB_TESTNET_RPC_URL = process.env.CKB_TESTNET_RPC_URL || 'https://testnet.ckbapp.dev/'
+const CKB_SECP256K1_BLAKE160_CODE_HASH = '0x9bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce8'
+const BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
+const BECH32M_CONST = 0x2bc830a3
 
 app.use(cors())
 app.use((_req, res, next) => {
@@ -269,32 +273,108 @@ async function prepareBrowserOutboundChannel({ pubkey, fundingAmountBaseUnits, r
   }
 }
 
-async function lockArgToAddress(lockArg) {
-  const { stdout } = await execFileAsync('ckb-cli', [
-    '--url',
-    'https://testnet.ckbapp.dev/',
-    'util',
-    'key-info',
-    '--lock-arg',
-    lockArg,
-    '--output-format',
-    'json',
-  ], { timeout: 30_000 })
-  return JSON.parse(stdout).address.testnet
+function bech32Polymod(values) {
+  const generators = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3]
+  let checksum = 1
+  for (const value of values) {
+    const top = checksum >> 25
+    checksum = ((checksum & 0x1ffffff) << 5) ^ value
+    for (let index = 0; index < generators.length; index += 1) {
+      if ((top >> index) & 1) checksum ^= generators[index]
+    }
+  }
+  return checksum >>> 0
+}
+
+function bech32HrpExpand(hrp) {
+  const expanded = []
+  for (const char of hrp) expanded.push(char.charCodeAt(0) >> 5)
+  expanded.push(0)
+  for (const char of hrp) expanded.push(char.charCodeAt(0) & 31)
+  return expanded
+}
+
+function bytesToBase32(bytes) {
+  const values = []
+  let accumulator = 0
+  let bits = 0
+  for (const byte of bytes) {
+    accumulator = (accumulator << 8) | byte
+    bits += 8
+    while (bits >= 5) {
+      bits -= 5
+      values.push((accumulator >> bits) & 31)
+    }
+  }
+  if (bits > 0) values.push((accumulator << (5 - bits)) & 31)
+  return values
+}
+
+function bech32mEncode(hrp, bytes) {
+  const data = bytesToBase32(bytes)
+  const checksumInput = [...bech32HrpExpand(hrp), ...data, 0, 0, 0, 0, 0, 0]
+  const polymod = bech32Polymod(checksumInput) ^ BECH32M_CONST
+  const checksum = []
+  for (let index = 0; index < 6; index += 1) {
+    checksum.push((polymod >> (5 * (5 - index))) & 31)
+  }
+  return `${hrp}1${[...data, ...checksum].map((value) => BECH32_CHARSET[value]).join('')}`
+}
+
+function lockArgToAddress(lockArg) {
+  const codeHash = Buffer.from(CKB_SECP256K1_BLAKE160_CODE_HASH.slice(2), 'hex')
+  const args = Buffer.from(lockArg.slice(2), 'hex')
+  // CKB2021 full address payload: 0x00 + code_hash + hash_type(type=0x01) + args.
+  return bech32mEncode('ckt', Buffer.concat([Buffer.from([0]), codeHash, Buffer.from([1]), args]))
+}
+
+async function ckbRpc(method, params) {
+  const response = await fetch(CKB_TESTNET_RPC_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  })
+  if (!response.ok) {
+    throw new Error(`CKB RPC returned HTTP ${response.status}`)
+  }
+  const payload = await response.json()
+  if (payload.error) {
+    throw new Error(payload.error.message || `CKB RPC ${method} failed`)
+  }
+  return payload.result
+}
+
+function formatCapacity(capacityShannons) {
+  const whole = capacityShannons / 100_000_000n
+  const fractional = capacityShannons % 100_000_000n
+  if (fractional === 0n) return `${whole}.0 (CKB)`
+  return `${whole}.${fractional.toString().padStart(8, '0').replace(/0+$/, '')} (CKB)`
 }
 
 async function capacityByLockArg(lockArg) {
-  const { stdout } = await execFileAsync('ckb-cli', [
-    '--url',
-    'https://testnet.ckbapp.dev/',
-    'wallet',
-    'get-capacity',
-    '--lock-arg',
-    lockArg,
-    '--output-format',
-    'json',
-  ], { timeout: 30_000 })
-  return JSON.parse(stdout).total
+  const searchKey = {
+    script: {
+      code_hash: CKB_SECP256K1_BLAKE160_CODE_HASH,
+      hash_type: 'type',
+      args: lockArg,
+    },
+    script_type: 'lock',
+  }
+  let cursor = null
+  let total = 0n
+
+  do {
+    const params = cursor
+      ? [searchKey, 'asc', '0x64', cursor]
+      : [searchKey, 'asc', '0x64']
+    const result = await ckbRpc('get_cells', params)
+    for (const cell of result.objects || []) {
+      total += BigInt(cell.output?.capacity || '0x0')
+    }
+    cursor = result.last_cursor && result.last_cursor !== '0x' ? result.last_cursor : null
+  } while (cursor)
+
+  return formatCapacity(total)
 }
 
 async function transferDevCapacity(address, capacityCkb) {

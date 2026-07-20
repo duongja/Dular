@@ -301,7 +301,6 @@ function SelfCustodyDashboard({
   onLock,
   onSignOut,
   onRefreshNetwork,
-  onFundWallet,
 }) {
   const readyChannels = (channels?.channels || []).filter(isReadyChannel)
   const spendableBaseUnits = sumChannelBalance(readyChannels)
@@ -397,10 +396,17 @@ function SelfCustodyDashboard({
               </div>
             </div>
             <p className="muted">
-              For this testnet build, add CKB for channel fees first, then add RUSD to spend in the app.
+              For this testnet build, fund this browser wallet with testnet CKB from the faucet, then add RUSD to spend in the app.
             </p>
             <div className="buttonRow wrapButtons">
-              <button type="button" className="secondaryBtn" onClick={onFundWallet}>Add testnet CKB</button>
+              <a
+                className="secondaryBtn"
+                href="https://faucet.nervos.org/"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open CKB faucet
+              </a>
               {walletAddress && <CopyButton value={walletAddress} label="Copy address" />}
             </div>
             <TopUpCard nodeInfo={nodeInfo} onRefreshNetwork={onRefreshNetwork} />
@@ -1157,24 +1163,6 @@ export default function SelfCustodyApp() {
     return { info, startupWarnings }
   }, [refreshNetwork, registerDevice])
 
-  async function fundWallet() {
-    if (!funding?.address) return
-    setSetupStatus(null)
-    try {
-      await api('/fiber/browser/fund-ckb', {
-        method: 'POST',
-        body: JSON.stringify({ address: funding.address, capacityCkb: 200 }),
-      })
-      await refreshNetwork()
-      setSetupStatus({
-        type: 'success',
-        message: 'Testnet CKB funding submitted to your wallet address. Wait briefly, then open a channel and credit the wallet.',
-      })
-    } catch (error) {
-      setSetupStatus({ type: 'error', message: error.message || 'Could not fund the wallet address.' })
-    }
-  }
-
   async function createWallet(pin, confirmPin) {
     if (pin.length < 4) {
       setSetupStatus({ type: 'error', message: 'Use a PIN with at least 4 digits.' })
@@ -1382,7 +1370,6 @@ export default function SelfCustodyApp() {
       onLock={lockWallet}
       onSignOut={signOut}
       onRefreshNetwork={refreshNetwork}
-      onFundWallet={fundWallet}
     />
   )
 }
