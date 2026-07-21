@@ -7,7 +7,14 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   globalIgnores(['dist']),
   {
-    files: ['src/main.jsx', 'src/MilestoneOneApp.jsx'],
+    files: [
+      'src/main.jsx',
+      'src/DularApp.jsx',
+      'src/BrandMark.jsx',
+      'src/SelfCustodyApp.jsx',
+      'src/MilestoneOneApp.jsx',
+      'src/lib/**/*.js',
+    ],
     extends: [
       js.configs.recommended,
       reactHooks.configs.flat.recommended,

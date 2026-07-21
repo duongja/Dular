@@ -67,7 +67,7 @@ function mpesaPhone(phone) {
   return phone.replace('+', '')
 }
 
-export async function initiateStkPush({ phone, amountKes, accountReference }) {
+export async function initiateStkPush({ phone, amountKes, accountReference, callbackUrl }) {
   if (config.demoMode) {
     const id = `demo-stk-${Date.now()}`
     return {
@@ -97,7 +97,7 @@ export async function initiateStkPush({ phone, amountKes, accountReference }) {
       PartyA: mpesaPhone(phone),
       PartyB: config.mpesa.shortcode,
       PhoneNumber: mpesaPhone(phone),
-      CallBackURL: `${config.publicBaseUrl}/api/mpesa/callback/stk`,
+      CallBackURL: callbackUrl || `${config.publicBaseUrl}/api/mpesa/callback/stk`,
       AccountReference: accountReference,
       TransactionDesc: 'Dular RUSD deposit',
     }),
@@ -140,7 +140,7 @@ export async function queryStkPushStatus({ checkoutRequestId }) {
   })
 }
 
-export async function initiateB2c({ phone, amountKes, remarks, occasion }) {
+export async function initiateB2c({ phone, amountKes, remarks, occasion, originatorConversationId, resultUrl, timeoutUrl }) {
   if (config.demoMode) {
     return {
       ConversationID: `demo-b2c-${Date.now()}`,
@@ -158,7 +158,7 @@ export async function initiateB2c({ phone, amountKes, remarks, occasion }) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      OriginatorConversationID: `dular-${Date.now()}`,
+      OriginatorConversationID: originatorConversationId || `dular-${Date.now()}`,
       InitiatorName: config.mpesa.initiatorName,
       SecurityCredential: config.mpesa.securityCredential,
       CommandID: 'BusinessPayment',
@@ -166,8 +166,8 @@ export async function initiateB2c({ phone, amountKes, remarks, occasion }) {
       PartyA: config.mpesa.b2cShortcode,
       PartyB: mpesaPhone(phone),
       Remarks: remarks || 'Dular withdrawal',
-      QueueTimeOutURL: config.mpesa.timeoutUrl || `${config.publicBaseUrl}/api/mpesa/callback/b2c-timeout`,
-      ResultURL: `${config.publicBaseUrl}/api/mpesa/callback/b2c`,
+      QueueTimeOutURL: timeoutUrl || config.mpesa.timeoutUrl || `${config.publicBaseUrl}/api/mpesa/callback/b2c-timeout`,
+      ResultURL: resultUrl || `${config.publicBaseUrl}/api/mpesa/callback/b2c`,
       Occasion: occasion || 'Dular',
     }),
   })

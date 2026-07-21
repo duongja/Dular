@@ -1,11 +1,8 @@
 # Dular — Mobile Money Stablecoin Wallet on Fiber Network
 
-Dular is a phone-number stablecoin wallet for mobile money markets. It lets users verify a phone number, deposit from M-Pesa, receive RUSD, send RUSD to another Dular phone number, and track every payment in a mobile-first wallet UI.
+Dular is a browser self-custody stablecoin wallet for mobile money markets. Users verify a phone number, hold their Fiber and CKB keys on-device, move between M-Pesa KES and testnet RUSD, and make direct Fiber payments.
 
-The current implementation now has two parallel paths:
-
-- Managed wallet: phone identity, M-Pesa STK deposit, testnet-backed Fiber settlement, and the original end-user wallet UX.
-- Self-custody beta: mobile-browser Fiber WASM wallet with device-held keys, browser node startup, and direct Fiber invoice send/receive.
+The active product is web-only. The earlier hosted-node PostgreSQL-ledger wallet and USSD implementation remain as archived milestone code, but their money endpoints are disabled unless `LEGACY_MANAGED_WALLET_ENABLED=true`.
 
 ## Current State
 
@@ -13,48 +10,48 @@ Shipped in this repo:
 
 - Phone number onboarding with OTP verification through Africa's Talking SMS.
 - Phone-to-Fiber identity registry with public lookup endpoint.
-- Production-style mobile wallet UI with Home, Deposit, Send, Withdraw, Activity, and Account screens.
-- Parallel self-custody beta path with browser Fiber node startup and device-held keys.
-- M-Pesa STK Push deposit flow using Daraja.
-- Background receiver Fiber invoice generation for deposits.
-- Public testnet Fiber settlement from the Dular payer node to a separate receiver node.
-- Daraja STK status reconciliation, so deposits can complete even when callbacks are delayed or missed.
-- Unified activity feed for M-Pesa deposits/withdrawals and Dular phone-to-phone sends/receives.
+- Browser Fiber node startup with PIN-encrypted device-held keys.
+- Menu-driven Dashboard, M-Pesa, Receive, Send, and Wallet views.
+- Capped, expiring market USD/KES quotes using integer settlement arithmetic.
+- Production Daraja STK Push deposits settled by paying an invoice signed by the browser wallet.
+- Reusable direct operator-to-browser RUSD channels and delayed-delivery recovery.
+- Idempotent ramp orders, callback deduplication, status history, and redacted proof endpoints.
+- Operator-signed cash-out invoices, B2C state handling, and browser refund invoices.
 - Verification endpoints and scripts for milestone evidence.
 
 Not complete yet:
 
-- B2C withdrawal production flow depends on valid M-Pesa initiator/security credential setup.
-- USSD interface exists in simulator-tested form but is not the chosen live testing path.
-- The self-custody beta does not yet include in-app channel funding/rebalancing.
-- M-Pesa deposit -> browser invoice settlement is still follow-up work.
+- B2C production cash-out remains feature-gated until valid M-Pesa initiator/security credentials are available.
+- Testnet RUSD is a capped pilot asset and must not be presented as production-money redemption.
+- Device recovery and durable background settlement workers remain post-pilot work.
 - Pilot-user reporting is planned for Milestone 3.
 
 ## User Flow
 
-1. User verifies their M-Pesa phone number.
-2. User enters a deposit amount in KES.
-3. Dular creates a receiver-node Fiber invoice in the background.
-4. Dular sends an M-Pesa STK Push to the user's phone.
-5. After M-Pesa succeeds, Dular pays the receiver Fiber invoice with public testnet RUSD.
-6. The in-app RUSD ledger is credited only after Fiber payment success.
-7. User can send RUSD to another verified Dular phone number.
+1. The browser starts a self-custody Fiber node and registers its Fiber identity and CKB funding lock.
+2. Dular returns a capped, expiring KES/RUSD market quote.
+3. Before requesting M-Pesa, Dular prepares sufficient operator-to-browser RUSD capacity.
+4. The browser signs an invoice for the exact quoted RUSD and the API validates its payee, asset, amount, description, hash, and expiry.
+5. Dular requests an STK Push and independently reconciles the checkout through Daraja.
+6. After confirmed KES receipt, the operator pays the browser invoice exactly once.
+7. The order completes only after Fiber payment success; no PostgreSQL user balance is credited.
 
 Technical proof is hidden under "Proof details" in the UI so the product feels end-user facing while still exposing payment hashes and checkout IDs for verification.
 
 ## Architecture
 
 ```text
-React wallet UI
+React browser wallet
   |
   | /api
   v
 Express API
-  |-- PostgreSQL ledger, phone registry, sessions, transactions
+  |-- PostgreSQL phone registry, quotes, ramp orders, events, and evidence
   |-- Africa's Talking SMS OTP
-  |-- Safaricom Daraja STK Push + STK query
-  |-- Fiber payer node RPC :8227
-  `-- Fiber receiver node RPC :8247
+  |-- Safaricom Daraja STK Push, query, and feature-gated B2C
+  `-- Authenticated Fiber operator RPC
+
+Browser Fiber node <-- public WSS --> Dular Fiber operator
 
 CKB public testnet
   `-- Fiber payment channel funding and RUSD UDT settlement
@@ -103,9 +100,8 @@ DATABASE_URL=
 SESSION_SECRET=
 PUBLIC_BASE_URL=
 FIBER_RPC_URL=http://127.0.0.1:8227
+FIBER_GATEWAY_RPC_TOKEN=
 FIBER_OPERATOR_WS_ADDR=
-FIBER_RECEIVER_RPC_URL=http://127.0.0.1:8247
-FIBER_RECEIVER_CKB_ADDRESS=
 ```
 
 For live integrations, also set:
@@ -124,9 +120,14 @@ MPESA_B2C_SHORTCODE=
 MPESA_INITIATOR_NAME=
 MPESA_SECURITY_CREDENTIAL=
 MPESA_TIMEOUT_URL=
-USSD_ENABLED=true
-USSD_WITHDRAWALS_ENABLED=false
-USSD_SERVICE_CODE=*483*XXXX#
+RAMP_DEPOSITS_ENABLED=true
+RAMP_WITHDRAWALS_ENABLED=false
+RAMP_CALLBACK_TOKEN=<long-random-token>
+RAMP_OPERATOR_TOKEN=<different-long-random-token>
+RAMP_MIN_KES=10
+RAMP_MAX_KES=1000
+RAMP_FEE_BPS=25
+RAMP_USD_KES_RATE=
 ```
 
 Do not commit `.env`.
@@ -144,7 +145,15 @@ PUBLIC_BASE_URL=https://<your-vercel-domain>
 DEMO_MODE=false
 OTP_DEMO_MODE=true
 FIBER_RPC_URL=https://<railway-fiber-domain>/rpc
+FIBER_GATEWAY_RPC_TOKEN=<same-token-configured-on-railway>
 FIBER_OPERATOR_WS_ADDR=/dns4/<railway-fiber-domain>/tcp/443/wss
+RAMP_DEPOSITS_ENABLED=true
+RAMP_WITHDRAWALS_ENABLED=false
+RAMP_CALLBACK_TOKEN=<long-random-token>
+RAMP_OPERATOR_TOKEN=<different-long-random-token>
+RAMP_MIN_KES=10
+RAMP_MAX_KES=1000
+RAMP_FEE_BPS=25
 ```
 
 Use `OTP_DEMO_MODE=true` for reviewer/test deployments when Africa's Talking SMS is not live yet. This keeps the database/API live while returning the visible OTP code `123456` in the app. Set `OTP_DEMO_MODE=false` only after `AT_USERNAME`, `AT_API_KEY`, and the approved sender route are working.
@@ -172,45 +181,16 @@ Expected response includes `phone`, `fiberPubkey`, `verifiedAt`, and `lookupProo
 npm run migrate
 ```
 
-### 4. Start Fiber Nodes
+### 4. Start the Fiber Operator
 
-The Milestone 1 deposit flow uses two local Fiber nodes:
-
-- Payer node: `http://127.0.0.1:8227`
-- Receiver node: `http://127.0.0.1:8247`
-
-Create/configure the receiver node:
-
-```bash
-npm run fiber:setup:receiver
-```
-
-Start each node in a separate terminal:
+For local development, start the operator node:
 
 ```bash
 export FIBER_SECRET_KEY_PASSWORD='your-node-password'
 npm run fiber:start:payer
 ```
 
-```bash
-export FIBER_SECRET_KEY_PASSWORD='your-node-password'
-npm run fiber:start:receiver
-```
-
-Connect/open the local payer-to-receiver channel:
-
-```bash
-npm run fiber:connect-local
-npm run fiber:open-receiver
-```
-
-Check node/channel status:
-
-```bash
-npm run fiber:status
-```
-
-The payer node must have enough outbound RUSD liquidity for deposits. If a user deposits 10 KES and the channel only has 9 RUSD outbound, M-Pesa can succeed while Fiber settlement becomes `ActionRequired`.
+The operator must have enough testnet CKB and RUSD for capped browser channels. Dular prepares the exact route before it starts an STK Push, so insufficient operator liquidity cannot collect KES first.
 
 ### 5. Start API and Frontend
 
@@ -235,6 +215,7 @@ http://localhost:5173
 | `npm run dev` | Start Vite frontend |
 | `npm run dev:api` | Start Express API |
 | `npm run migrate` | Apply PostgreSQL schema |
+| `npm test` | Run ramp arithmetic, invoice, and state-machine tests |
 | `npm run fiber:status` | Inspect payer/receiver Fiber nodes |
 | `npm run fiber:connect-local` | Connect payer node to receiver node |
 | `npm run fiber:open-receiver` | Open payer-to-receiver RUSD channel |
@@ -253,16 +234,19 @@ Important endpoints:
 | --- | --- |
 | `POST /api/auth/request-otp` | Send OTP to phone |
 | `POST /api/auth/verify-otp` | Verify OTP and create session |
-| `GET /api/me` | Current user and RUSD balance |
+| `GET /api/me` | Current verified user |
 | `GET /api/registry/lookup?phone=...` | Phone-to-Fiber identity lookup |
-| `POST /api/fiber/register-device` | Register a browser/device Fiber pubkey after OTP verification |
-| `POST /api/fiber/receiver/invoice` | Create receiver-node Fiber invoice |
-| `POST /api/mpesa/deposit` | Start M-Pesa STK deposit |
-| `POST /api/mpesa/deposits/:id/reconcile` | Query Daraja and retry settlement |
-| `POST /api/payments/send-phone` | Send RUSD to another Dular phone |
-| `GET /api/transactions` | Unified activity feed |
-| `GET /api/verification/deposit/:checkoutRequestId` | Public milestone verification data |
-| `POST /api/ussd` | Africa's Talking USSD simulator callback |
+| `POST /api/fiber/register-device` | Bind a browser Fiber pubkey and CKB lock after OTP verification and signed Fiber-invoice proof |
+| `GET /api/ramp/config` | Pilot limits and ramp availability |
+| `POST /api/ramp/quotes` | Create an expiring market-rate quote |
+| `POST /api/ramp/deposits` | Create an idempotent browser deposit order |
+| `PUT /api/ramp/deposits/:id/invoice` | Validate and bind the browser invoice |
+| `POST /api/ramp/deposits/:id/stk` | Start STK only after route/invoice validation |
+| `POST /api/ramp/orders/:id/reconcile` | Reconcile M-Pesa and Fiber settlement |
+| `POST /api/ramp/withdrawals` | Create a feature-gated cash-out order |
+| `GET /api/verification/ramp/:id` | Redacted completed-order evidence |
+
+Legacy `/api/mpesa/*`, PostgreSQL phone-payment, and `/api/ussd` money paths return `410` unless explicitly re-enabled for historical verification.
 
 ## Verification
 
@@ -270,34 +254,34 @@ Milestone verification artifacts are under:
 
 ```text
 verification/milestone-1/
+WEB_MPESA_RAMP.md
 ```
 
 Useful checks:
 
 ```bash
-curl http://localhost:8787/api/verification/deposit/<CheckoutRequestID>
+curl http://localhost:8787/api/verification/ramp/<completed-order-id>
 npm run check:stk-status -- <CheckoutRequestID>
 npm run fiber:status
 ```
 
-The verification endpoint shows:
+The ramp verification endpoint shows:
 
 - M-Pesa checkout/request IDs.
 - Deposit status and receipt when available.
-- Receiver Fiber invoice.
+- Browser-signed Fiber invoice.
 - Fiber payment hash/status when settlement succeeds.
-- Fiber route data when available.
+- Immutable quote arithmetic and order-state history.
 
 ## Troubleshooting
 
 | Problem | Likely Cause | Fix |
 | --- | --- | --- |
-| Deposit stuck at `Action needed` | M-Pesa succeeded but Fiber settlement could not complete | Add/rebalance outbound RUSD liquidity, then retry settlement |
-| `Receiver Fiber invoice payment hash is required` | Old API response shape or stale server | Restart API after pulling latest code |
-| Activity missing phone sends | Old API server still running | Restart API so unified feed is active |
-| STK accepted but balance not updated | Daraja callback did not reach API | Reconciliation polls STK query; keep app open or call `/reconcile` |
-| `Fiber payment ... not found after send timeout` | Fiber node did not record the invoice payment | Check channel liquidity and payer node `list_payments` |
-| `Insufficient RUSD balance` | User ledger balance is too low | Deposit or credit test balance before sending/withdrawing |
+| Deposit cannot continue before STK | No single ready operator-to-browser RUSD channel can carry the quote | Keep the browser open, confirm operator RUSD/CKB, and resume route preparation |
+| Order is `delivery_pending` | KES is confirmed but the browser invoice could not settle | Reopen the browser wallet and reconcile the same order; never create a second STK order |
+| `M-Pesa request status needs support review` | STK submission became ambiguous before a checkout ID was stored | Reconcile against Daraja/operator records; do not retry automatically |
+| Cash-out unavailable | B2C credentials or feature flag are incomplete | Keep `RAMP_WITHDRAWALS_ENABLED=false` until production credentials pass verification |
+| Fiber gateway returns `401` | Gateway/backend RPC tokens do not match | Set the same `FIBER_GATEWAY_RPC_TOKEN` on Railway and the API deployment |
 | SMS not received | Sender ID/route/account issue | Check Africa's Talking dashboard and SMS status |
 
 ## Security Notes
@@ -306,6 +290,8 @@ The verification endpoint shows:
 - Do not put GitHub tokens, Daraja credentials, Africa's Talking keys, or Fiber passwords in Git remotes or source files.
 - Fiber node start scripts require `FIBER_SECRET_KEY_PASSWORD` from the shell environment.
 - `DEMO_MODE=true` is intended only for local mock development.
+- Keep `LEGACY_MANAGED_WALLET_ENABLED=false` for the self-custody product.
+- Use separate long random `RAMP_CALLBACK_TOKEN` and `RAMP_OPERATOR_TOKEN` values. The latter protects audited provider adjudication and must never appear in callback URLs or browser configuration.
 
 ## License
 

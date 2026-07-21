@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import BrandMark from './BrandMark.jsx'
 import './App.css'
+import { clearAuthToken, getAuthToken, setAuthToken } from './lib/authToken.js'
 
 const RUSD_BASE = 100000000n
 const ACTIVE_DEPOSIT_STATUSES = new Set(['initiating', 'pending', 'mpesa_paid_fiber_pending'])
@@ -33,16 +34,13 @@ const NAV_ITEMS = [
   { id: 'account', label: 'Account', Icon: UserRound },
 ]
 
-function token() {
-  return localStorage.getItem('dular_token') || ''
-}
-
 async function api(path, options = {}) {
+  const authToken = getAuthToken()
   const res = await fetch(`/api${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      ...(token() ? { Authorization: `Bearer ${token()}` } : {}),
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       ...(options.headers || {}),
     },
   })
@@ -189,7 +187,7 @@ function AuthGate({ onAuth, onSwitchMode, onOpenChooser }) {
         method: 'POST',
         body: JSON.stringify({ phone, code }),
       })
-      localStorage.setItem('dular_token', result.token)
+      setAuthToken(result.token)
       onAuth(result.user)
     } catch (error) {
       setStatus({ type: 'error', message: error.message })
@@ -781,13 +779,13 @@ export default function MilestoneOneApp({ onSwitchMode = null, onOpenChooser = n
   }, [])
 
   function signOut() {
-    localStorage.removeItem('dular_token')
+    clearAuthToken()
     setUser(null)
   }
 
   useEffect(() => {
     async function boot() {
-      if (!token()) {
+      if (!getAuthToken()) {
         startTransition(() => setBooting(false))
         return
       }
@@ -799,7 +797,7 @@ export default function MilestoneOneApp({ onSwitchMode = null, onOpenChooser = n
           setBooting(false)
         })
       } catch {
-        localStorage.removeItem('dular_token')
+          clearAuthToken()
         startTransition(() => setBooting(false))
       }
     }

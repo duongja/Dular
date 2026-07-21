@@ -857,6 +857,300 @@ a svg {
   line-height: 1.55;
 }
 
+.backToWalletBtn {
+  margin-bottom: 1rem;
+}
+
+.mpesaHero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.mpesaHero > div:first-child {
+  min-width: 0;
+}
+
+.mpesaHero > div:first-child > p:last-child {
+  max-width: 650px;
+  margin-top: 0.45rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.rampSegmented {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.2rem;
+  padding: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+}
+
+.rampSegmented button {
+  min-height: 36px;
+  padding: 0.45rem 0.65rem;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.rampSegmented button.active {
+  border-color: var(--line-strong);
+  background: var(--surface);
+  color: var(--green-dark);
+  box-shadow: var(--shadow-soft);
+}
+
+.mpesaRampCard {
+  overflow: hidden;
+}
+
+.rampAvailability,
+.rampLoading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.rampAvailability svg,
+.rampLoading svg {
+  flex: 0 0 auto;
+  color: var(--amber);
+}
+
+.rampAmountForm {
+  margin-top: 1.2rem;
+}
+
+.rampQuote {
+  margin-top: 1.15rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.rampQuoteHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.45rem;
+}
+
+.rampQuoteHeading > strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.rampQuoteHeading > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 720;
+}
+
+.rampQuoteHeading > span.expired {
+  color: var(--red);
+}
+
+.quoteSummary {
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.quoteSummary > div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.55rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.quoteSummary dt,
+.quoteSummary dd {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.quoteSummary dt {
+  color: var(--muted);
+}
+
+.quoteSummary dd {
+  min-width: 0;
+  color: var(--ink);
+  font-weight: 740;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.quoteSummary .quoteTotal dt,
+.quoteSummary .quoteTotal dd {
+  color: var(--green-dark);
+  font-weight: 800;
+}
+
+.rampProgress {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 1.2rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rampProgress li {
+  position: relative;
+  min-width: 0;
+  color: var(--soft);
+  font-size: 0.68rem;
+  text-align: center;
+}
+
+.rampProgress li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  top: 13px;
+  right: -50%;
+  left: 50%;
+  height: 1px;
+  background: var(--line-strong);
+}
+
+.rampProgress li.done:not(:last-child)::after {
+  background: var(--green);
+}
+
+.rampProgress li > span {
+  position: relative;
+  z-index: 1;
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 0.4rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  font-size: 0.7rem;
+  font-weight: 780;
+}
+
+.rampProgress li strong {
+  display: block;
+  padding: 0 0.15rem;
+  color: inherit;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.rampProgress li.current,
+.rampProgress li.done {
+  color: var(--green-dark);
+}
+
+.rampProgress li.current > span,
+.rampProgress li.done > span {
+  border-color: var(--green);
+  background: var(--green);
+  color: #fff;
+}
+
+.rampRouteIssue {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 1rem;
+  padding: 0.2rem 0 0.2rem 0.9rem;
+  border-left: 3px solid #b47a18;
+}
+
+.rampRouteIssue > strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.rampRouteIssue > p:not(.eyebrow) {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.rampSubmitBtn {
+  margin-top: 1rem;
+}
+
+.rampOrderList {
+  margin-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.rampOrderItem {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rampOrderItem:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.rampOrderItem.pending .activityIcon {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.rampOrderItem.settling .activityIcon {
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.rampOrderItem.error .activityIcon {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.rampTechnical {
+  margin-top: 0.65rem;
+}
+
+.rampTechnical summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 720;
+}
+
+.rampTechnical[open] summary {
+  color: var(--green-dark);
+}
+
+.rampTechnical > div {
+  margin-top: 0.45rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--line);
+}
+
 .sectionHeader {
   display: flex;
   align-items: flex-start;
@@ -1581,6 +1875,20 @@ a svg {
     align-items: flex-start;
   }
 
+  .mpesaHero {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .rampSegmented {
+    width: 100%;
+  }
+
+  .rampSegmented button {
+    padding-right: 0.35rem;
+    padding-left: 0.35rem;
+  }
+
   .safePill {
     white-space: normal;
   }
@@ -1593,6 +1901,18 @@ a svg {
   .activityMeta {
     flex-direction: column;
     gap: 0.2rem;
+  }
+
+  .rampOrderItem .activityTop {
+    flex-direction: column;
+  }
+
+  .rampOrderItem .activityAmount {
+    text-align: left;
+  }
+
+  .rampRouteIssue .buttonRow > * {
+    flex: 1 1 150px;
   }
 
   .proofRow {

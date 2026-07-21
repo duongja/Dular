@@ -49,6 +49,7 @@ export function publicUser(row, balance = '0') {
     phone: row.phone,
     displayName: row.display_name,
     fiberPubkey: row.fiber_pubkey,
+    walletBound: Boolean(row.ckb_lock_arg),
     verifiedAt: row.verified_at,
     balanceBaseUnits: String(balance),
   }

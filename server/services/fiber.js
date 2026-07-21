@@ -25,9 +25,12 @@ async function withTimeout(promise, ms, label) {
 }
 
 export async function fiberRpc(method, params = [], rpcUrl = config.fiberRpcUrl) {
+  const authorization = config.fiberRpcToken && rpcUrl === config.fiberRpcUrl
+    ? { Authorization: `Bearer ${config.fiberRpcToken}` }
+    : {}
   const response = await withTimeout(fetch(rpcUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authorization },
     body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method, params }),
   }), 30000, `Fiber RPC ${method}`)
   const text = await response.text()
@@ -66,13 +69,41 @@ export async function createReceiverInvoice({ amountBaseUnits, description }) {
   return result
 }
 
+export async function createOperatorInvoice({ amountBaseUnits, description, expiry = '0xe10' }) {
+  return fiberRpc('new_invoice', [{
+    amount: hex(amountBaseUnits),
+    currency: 'Fibt',
+    description,
+    expiry,
+    udt_type_script: RUSD_TYPE_SCRIPT,
+  }])
+}
+
+export async function getFiberInvoice(paymentHash) {
+  return fiberRpc('get_invoice', [{ payment_hash: paymentHash }])
+}
+
+export async function getFiberPayment(paymentHash) {
+  try {
+    return await getFiberPaymentDirect(paymentHash)
+  } catch {
+    const result = await fiberRpc('list_payments', [{ limit: '0x64' }])
+    return result.payments?.find((payment) => payment.payment_hash === paymentHash) || null
+  }
+}
+
+export async function getFiberPaymentDirect(paymentHash) {
+  return fiberRpc('get_payment', [{ payment_hash: paymentHash }])
+}
+
 export async function listChannelsByPeer(pubkey, options = {}, rpcUrl = config.fiberRpcUrl) {
   if (typeof options === 'string') {
     rpcUrl = options
     options = {}
   }
-  const params = { pubkey }
+  const params = pubkey ? { pubkey } : {}
   if (options.includeClosed) params.include_closed = true
+  if (options.onlyPending) params.only_pending = true
   return fiberRpc('list_channels', [params], rpcUrl)
 }
 

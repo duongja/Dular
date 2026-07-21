@@ -133,7 +133,7 @@ export async function createWalletRecord(phone, pin) {
     updatedAt: walletSecrets.createdAt,
     version: 1,
   }
-  await saveWalletRecord(record)
+  await transaction('readwrite', (store) => store.add(record))
   return record
 }
 

@@ -3,7 +3,7 @@ import { ensureLedgerAccount } from './services/ledger.js'
 import { normalizePhone } from './utils.js'
 
 const rawPhone = process.argv[2]
-const fiberPubkey = String(process.argv[3] || '').trim()
+const fiberPubkey = String(process.argv[3] || '').trim().toLowerCase()
 
 if (!rawPhone || !fiberPubkey) {
   console.error('Usage: npm run registry:seed -- <phone> <fiber_pubkey>')
@@ -17,12 +17,14 @@ const user = await withTransaction(async (client) => {
     `INSERT INTO users (phone, fiber_pubkey, verified_at)
      VALUES ($1, $2, now())
      ON CONFLICT (phone) DO UPDATE
-     SET fiber_pubkey = EXCLUDED.fiber_pubkey,
-         verified_at = now(),
-         updated_at = now()
+     SET fiber_pubkey = COALESCE(users.fiber_pubkey, EXCLUDED.fiber_pubkey),
+          verified_at = now(),
+          updated_at = now()
+     WHERE users.fiber_pubkey IS NULL OR users.fiber_pubkey = EXCLUDED.fiber_pubkey
      RETURNING *`,
     [phone, fiberPubkey],
   )
+  if (!result.rows[0]) throw new Error('This phone is already bound to a different Fiber wallet')
   await ensureLedgerAccount(client, result.rows[0].id)
   return result.rows[0]
 })

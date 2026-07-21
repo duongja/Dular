@@ -40,7 +40,7 @@ fiber:
 rpc:
   listening_addr: "127.0.0.1:8227"
 ckb:
-  rpc_url: "https://testnet.ckbapp.dev/"
+  rpc_url: "https://testnet.ckb.dev/"
   udt_whitelist:
     - name: RUSD
       script:
@@ -67,6 +67,7 @@ export const RUSD_TYPE_SCRIPT = {
 
 let fiberLibPromise = null
 let fiberInstance = null
+let fiberDatabasePrefix = null
 
 async function loadFiberLib() {
   if (!fiberLibPromise) {
@@ -87,12 +88,18 @@ export async function startBrowserFiber({ fiberSecretKey, ckbSecretKey, database
     throw new Error('Browser Fiber requires a secure, cross-origin isolated page with SharedArrayBuffer support.')
   }
 
-  if (fiberInstance) return fiberInstance
+  if (fiberInstance) {
+    if (fiberDatabasePrefix !== databasePrefix) {
+      throw new Error('A different browser wallet is already running. Lock it before opening this wallet.')
+    }
+    return fiberInstance
+  }
 
   const { Fiber } = await loadFiberLib()
   const fiber = new Fiber()
   await fiber.start(TESTNET_CONFIG, fiberSecretKey, ckbSecretKey, undefined, 'info', databasePrefix)
   fiberInstance = fiber
+  fiberDatabasePrefix = databasePrefix
   return fiber
 }
 
@@ -103,8 +110,12 @@ export function getBrowserFiber() {
 
 export async function stopBrowserFiber() {
   if (!fiberInstance) return
-  await fiberInstance.stop()
-  fiberInstance = null
+  try {
+    await fiberInstance.stop()
+  } finally {
+    fiberInstance = null
+    fiberDatabasePrefix = null
+  }
 }
 
 export async function browserNodeInfo() {
@@ -115,8 +126,12 @@ export async function browserListPeers() {
   return getBrowserFiber().listPeers()
 }
 
-export async function browserListChannels() {
-  return getBrowserFiber().listChannels({})
+export async function browserListChannels(options = {}) {
+  return getBrowserFiber().listChannels(options)
+}
+
+export async function browserListPendingChannels() {
+  return browserListChannels({ only_pending: true })
 }
 
 export async function browserAcceptChannel({ temporaryChannelId, fundingAmountHex = '0x0' }) {
