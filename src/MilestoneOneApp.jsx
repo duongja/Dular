@@ -1,15 +1,36 @@
-import { useCallback, useEffect, useRef, useState, startTransition } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, startTransition } from 'react'
+import {
+  ArrowDownLeft,
+  ArrowDownToLine,
+  ArrowRight,
+  ArrowUpRight,
+  CheckCircle2,
+  CircleAlert,
+  Clock3,
+  History,
+  Home,
+  LogOut,
+  Plus,
+  RefreshCw,
+  Search,
+  SendHorizontal,
+  ShieldCheck,
+  Smartphone,
+  UserRound,
+  Wifi,
+} from 'lucide-react'
+import BrandMark from './BrandMark.jsx'
 import './App.css'
 
 const RUSD_BASE = 100000000n
 const ACTIVE_DEPOSIT_STATUSES = new Set(['initiating', 'pending', 'mpesa_paid_fiber_pending'])
 
 const NAV_ITEMS = [
-  { id: 'home', label: 'Home', icon: '⌂' },
-  { id: 'deposit', label: 'Deposit', icon: '+' },
-  { id: 'send', label: 'Send', icon: '→' },
-  { id: 'withdraw', label: 'Withdraw', icon: '↓' },
-  { id: 'account', label: 'Account', icon: '•' },
+  { id: 'home', label: 'Home', Icon: Home },
+  { id: 'deposit', label: 'Add', Icon: Plus },
+  { id: 'send', label: 'Send', Icon: SendHorizontal },
+  { id: 'withdraw', label: 'Cash out', Icon: ArrowDownToLine },
+  { id: 'account', label: 'Account', Icon: UserRound },
 ]
 
 function token() {
@@ -100,15 +121,23 @@ function transactionStage(tx) {
 
 function Status({ state }) {
   if (!state) return null
-  return <div className={`statusMessage ${state.type}`}>{state.message}</div>
+  const Icon = state.type === 'success' ? CheckCircle2 : state.type === 'error' ? CircleAlert : Clock3
+  return (
+    <div className={`statusMessage ${state.type}`} role={state.type === 'error' ? 'alert' : 'status'} aria-live="polite">
+      <Icon size={18} aria-hidden="true" />
+      <span>{state.message}</span>
+    </div>
+  )
 }
 
 function MoneyInput({ label, value, onChange, placeholder = '100', currency = 'KES', hint }) {
+  const inputId = useId()
   return (
     <div className="formGroup">
-      <label>{label}</label>
+      <label htmlFor={inputId}>{label}</label>
       <div className="amountField">
         <input
+          id={inputId}
           inputMode="decimal"
           min="1"
           value={value}
@@ -171,16 +200,21 @@ function AuthGate({ onAuth, onSwitchMode, onOpenChooser }) {
 
   return (
     <main className="authShell">
-      <section className="authHero">
-        <div className="brandMark">D</div>
-        <p className="eyebrow">Mobile money, upgraded</p>
-        <h1>Stable money for the phone number you already use.</h1>
-        <p>
-          Deposit from M-Pesa, hold RUSD, send to people by phone number, and cash out when you need local money.
-        </p>
+      <section className="authHero managedAuthHero">
+        <div className="authBrand"><BrandMark /><strong>Dular</strong></div>
+        <div className="authHeroContent">
+          <p className="eyebrow">M-Pesa and RUSD</p>
+          <h1>Move money with your phone number.</h1>
+          <p>Deposit from M-Pesa, send RUSD to verified Dular users, and cash out to your number.</p>
+          <div className="authFeatureList" aria-label="Wallet features">
+            <span><Smartphone size={18} /> M-Pesa deposits and cash-outs</span>
+            <span><SendHorizontal size={18} /> Phone-number payments</span>
+            <span><ShieldCheck size={18} /> SMS-verified wallet access</span>
+          </div>
+        </div>
         <div className="buttonRow wrapButtons">
-          {onSwitchMode && <button type="button" className="secondaryBtn" onClick={onSwitchMode}>Try self-custody beta</button>}
-          {onOpenChooser && <button type="button" className="ghostBtn" onClick={onOpenChooser}>Choose mode</button>}
+          {onSwitchMode && <button type="button" className="secondaryBtn" onClick={onSwitchMode}>Open self-custody wallet</button>}
+          {onOpenChooser && <button type="button" className="ghostBtn" onClick={onOpenChooser}>Wallet options</button>}
         </div>
       </section>
 
@@ -188,26 +222,26 @@ function AuthGate({ onAuth, onSwitchMode, onOpenChooser }) {
         {step === 'phone' ? (
           <form onSubmit={requestOtp}>
             <span className="stepPill">Step 1 of 2</span>
-            <h2>Enter your M-Pesa number</h2>
-            <p className="muted">We use this number to protect your wallet and send payment prompts.</p>
+            <h2>Sign in to Dular</h2>
+            <p className="muted">Use the mobile number linked to your M-Pesa account.</p>
             <div className="formGroup">
-              <label>Phone number</label>
-              <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="0712 345 678" required />
+              <label htmlFor="managed-phone">M-Pesa phone number</label>
+              <input id="managed-phone" type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="0712 345 678" required />
             </div>
-            <button type="submit" className="primaryBtn fullWidth" disabled={loading}>{loading ? 'Sending code...' : 'Continue'}</button>
+            <button type="submit" className="primaryBtn fullWidth" disabled={loading}>{loading ? 'Sending SMS code...' : 'Send SMS code'}<ArrowRight size={18} /></button>
           </form>
         ) : (
           <form onSubmit={verifyOtp}>
             <span className="stepPill">Step 2 of 2</span>
-            <h2>Confirm it is you</h2>
-            <p className="muted">Enter the 6-digit code sent to {phone}. {demoCode ? `Demo code: ${demoCode}` : ''}</p>
+            <h2>Enter your SMS code</h2>
+            <p className="muted">We sent a 6-digit code to {phone}. {demoCode ? `Demo code: ${demoCode}` : ''}</p>
             <div className="formGroup">
-              <label>Verification code</label>
-              <input value={code} onChange={(event) => setCode(event.target.value)} placeholder="123456" required />
+              <label htmlFor="managed-code">6-digit code</label>
+              <input id="managed-code" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value)} placeholder="123456" required />
             </div>
             <div className="buttonRow">
               <button type="button" className="secondaryBtn" onClick={() => setStep('phone')}>Change number</button>
-              <button type="submit" className="primaryBtn" disabled={loading}>{loading ? 'Verifying...' : 'Open wallet'}</button>
+              <button type="submit" className="primaryBtn" disabled={loading}>{loading ? 'Verifying...' : 'Open wallet'}<ArrowRight size={18} /></button>
             </div>
           </form>
         )}
@@ -221,11 +255,11 @@ function BalanceCard({ user, syncing, lastSyncedAt, onRefresh }) {
   return (
     <section className="balanceCard">
       <div className="balanceTopline">
-        <span>Available balance</span>
-        <button type="button" className="ghostBtn" onClick={onRefresh}>Refresh</button>
+        <span>RUSD balance</span>
+        <button type="button" className="ghostBtn iconTextBtn" onClick={onRefresh}><RefreshCw size={16} /> Update</button>
       </div>
       <strong>{formatRUsd(user.balanceBaseUnits)}</strong>
-      <p>{syncing ? 'Updating your latest payments...' : lastSyncedAt ? `Updated ${lastSyncedAt.toLocaleTimeString()}` : 'Connected to your wallet'}</p>
+      <p>{syncing ? 'Checking for new payments...' : lastSyncedAt ? `Balance updated at ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Wallet connected'}</p>
     </section>
   )
 }
@@ -245,30 +279,30 @@ function HomeScreen({ user, transactions, syncing, lastSyncedAt, onRefresh, setT
             <h2>{transactionStage(active).label}</h2>
             <p>{transactionStage(active).detail}</p>
           </div>
-          <button type="button" className="secondaryBtn" onClick={() => setTab('activity')}>Track</button>
+          <button type="button" className="secondaryBtn iconTextBtn" onClick={() => setTab('activity')}>Track <ArrowRight size={17} /></button>
         </section>
       )}
 
       <section className="quickActions">
         <button type="button" onClick={() => setTab('deposit')}>
-          <span>+</span>
-          Deposit
+          <span><Plus size={20} /></span>
+          Add money
         </button>
         <button type="button" onClick={() => setTab('send')}>
-          <span>→</span>
-          Send
+          <span><SendHorizontal size={20} /></span>
+          Send RUSD
         </button>
         <button type="button" onClick={() => setTab('withdraw')}>
-          <span>↓</span>
-          Withdraw
+          <span><ArrowDownToLine size={20} /></span>
+          Cash out
         </button>
       </section>
 
       <section className="contentCard">
         <div className="sectionHeader">
           <div>
-            <p className="eyebrow">Recent activity</p>
-            <h2>Payments</h2>
+            <p className="eyebrow">Transactions</p>
+            <h2>Recent activity</h2>
           </div>
           <button type="button" className="ghostBtn" onClick={() => setTab('activity')}>View all</button>
         </div>
@@ -321,28 +355,28 @@ function DepositFlow({ onCreated }) {
   return (
     <div className="screenStack">
       <section className="flowHero deposit">
-        <p className="eyebrow">Add money</p>
-        <h1>Deposit from M-Pesa</h1>
-        <p>Enter an amount, approve the STK prompt on your phone, and receive RUSD in your wallet.</p>
+        <p className="eyebrow">M-Pesa deposit</p>
+        <h1>Add money to Dular</h1>
+        <p>Enter an amount and approve the payment prompt on your phone. Your RUSD balance updates after M-Pesa confirms payment.</p>
       </section>
 
       <section className="contentCard">
         <form onSubmit={submit}>
           <MoneyInput
-            label="How much do you want to deposit?"
+            label="Deposit amount"
             value={amountKes}
             onChange={setAmountKes}
-            hint={amountKes ? `You will receive ${formatKes(amountKes)} RUSD after confirmation.` : 'Minimum KES 1.'}
+            hint={amountKes ? `Expected wallet credit: ${formatKes(amountKes)} RUSD.` : 'Minimum deposit: KES 1.'}
           />
           <button type="submit" className="primaryBtn fullWidth" disabled={loading || !amountKes}>
-            {loading ? 'Sending M-Pesa prompt...' : 'Continue to M-Pesa'}
+            {loading ? 'Sending payment prompt...' : 'Request M-Pesa deposit'}
           </button>
         </form>
         <Status state={status} />
         <StatusTimeline state={loading ? 'pending' : status?.type === 'success' ? 'sent' : 'idle'} />
         {generatedInvoice && (
           <details className="proofDrawer">
-            <summary>Proof details</summary>
+            <summary>Network details</summary>
             <ProofRow label="Receiver proof" value={generatedInvoice.paymentHash} />
             <ProofRow label="Amount" value={formatRUsd(generatedInvoice.amountBaseUnits)} />
           </details>
@@ -401,15 +435,15 @@ function SendFlow({ onDone }) {
   return (
     <div className="screenStack">
       <section className="flowHero send">
-        <p className="eyebrow">Send money</p>
-        <h1>Pay a phone number</h1>
-        <p>Send RUSD to another verified Dular user without copying wallet addresses.</p>
+        <p className="eyebrow">Phone payment</p>
+        <h1>Send RUSD</h1>
+        <p>Pay another verified Dular user directly to their phone number.</p>
       </section>
       <section className="contentCard">
         <form onSubmit={submit}>
           <div className="formGroup">
-            <label>Recipient phone number</label>
-            <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="0712 345 678" required />
+            <label htmlFor="recipient-phone">Recipient phone number</label>
+            <input id="recipient-phone" type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="0712 345 678" required />
           </div>
           <MoneyInput
             label="Amount to send"
@@ -417,9 +451,9 @@ function SendFlow({ onDone }) {
             onChange={setAmount}
             placeholder="1.00"
             currency="RUSD"
-            hint="The recipient receives RUSD instantly in their Dular wallet."
+            hint="The recipient's Dular balance updates after the transfer completes."
           />
-          <button type="submit" className="primaryBtn fullWidth" disabled={loading}>{loading ? 'Sending...' : 'Send payment'}</button>
+          <button type="submit" className="primaryBtn fullWidth" disabled={loading}>{loading ? 'Sending RUSD...' : 'Send RUSD'}<SendHorizontal size={18} /></button>
         </form>
         <Status state={status} />
       </section>
@@ -454,9 +488,9 @@ function WithdrawFlow({ onDone, balanceBaseUnits }) {
   return (
     <div className="screenStack">
       <section className="flowHero withdraw">
-        <p className="eyebrow">Cash out</p>
-        <h1>Withdraw to M-Pesa</h1>
-        <p>Convert your RUSD balance back to KES and receive it on your verified phone number.</p>
+        <p className="eyebrow">M-Pesa cash-out</p>
+        <h1>Cash out to M-Pesa</h1>
+        <p>Choose an amount to send to the M-Pesa number verified on this account.</p>
       </section>
       <section className="contentCard">
         <div className="availableLine">
@@ -465,12 +499,12 @@ function WithdrawFlow({ onDone, balanceBaseUnits }) {
         </div>
         <form onSubmit={submit}>
           <MoneyInput
-            label="Amount to withdraw"
+            label="Cash-out amount"
             value={amountKes}
             onChange={setAmountKes}
-            hint="Your RUSD balance is debited when the cash-out request starts."
+            hint="Your RUSD balance is reserved when the cash-out request starts."
           />
-          <button type="submit" className="primaryBtn fullWidth" disabled={loading}>{loading ? 'Starting cash-out...' : 'Withdraw to M-Pesa'}</button>
+          <button type="submit" className="primaryBtn fullWidth" disabled={loading}>{loading ? 'Starting cash-out...' : 'Cash out to M-Pesa'}<ArrowDownToLine size={18} /></button>
         </form>
         <Status state={status} />
       </section>
@@ -480,7 +514,7 @@ function WithdrawFlow({ onDone, balanceBaseUnits }) {
 
 function ActivityList({ rows, compact = false }) {
   if (rows.length === 0) {
-    return <div className="emptyState">No payments yet. Your deposits, sends, and withdrawals will appear here.</div>
+    return <div className="emptyState"><History size={22} /><strong>No transactions yet</strong><span>Deposits, payments, and cash-outs will appear here.</span></div>
   }
 
   return (
@@ -496,16 +530,17 @@ function ActivityItem({ tx }) {
   const stage = transactionStage(tx)
   const direction = ['deposit', 'phone_receive'].includes(tx.kind) ? '+' : '-'
   const title = tx.kind === 'deposit'
-    ? 'M-Pesa deposit'
+    ? 'Deposit from M-Pesa'
     : tx.kind === 'withdrawal'
-      ? 'M-Pesa withdrawal'
+      ? 'Cash out to M-Pesa'
       : tx.kind === 'phone_receive'
-        ? 'Dular payment received'
-        : 'Dular payment sent'
+        ? 'RUSD received'
+        : 'RUSD sent'
+  const TransactionIcon = tx.kind === 'deposit' ? ArrowDownLeft : tx.kind === 'withdrawal' ? ArrowUpRight : tx.kind === 'phone_receive' ? ArrowDownLeft : ArrowUpRight
 
   return (
     <article className={`activityItem ${stage.tone}`}>
-      <div className="activityIcon">{tx.kind === 'deposit' ? '+' : tx.kind === 'withdrawal' ? '↓' : tx.kind === 'phone_receive' ? '←' : '→'}</div>
+      <div className="activityIcon"><TransactionIcon size={19} /></div>
       <div className="activityBody">
         <div className="activityTop">
           <div>
@@ -522,7 +557,7 @@ function ActivityItem({ tx }) {
           <span>{new Date(tx.created_at).toLocaleString()}</span>
         </div>
         <details className="proofDrawer compactProof">
-          <summary>Proof details</summary>
+          <summary>Transaction details</summary>
           <ProofRow label="Status" value={tx.status} />
           {tx.provider_payload?.sourceId && <ProofRow label="Transfer ID" value={tx.provider_payload.sourceId} />}
           {tx.provider_payload?.counterpartyPhone && <ProofRow label="Phone" value={tx.provider_payload.counterpartyPhone} />}
@@ -542,7 +577,7 @@ function ActivityScreen({ transactions }) {
       <section className="sectionHeader loose">
         <div>
           <p className="eyebrow">Wallet history</p>
-          <h1>Activity</h1>
+          <h1>All transactions</h1>
         </div>
       </section>
       <section className="contentCard">
@@ -582,30 +617,30 @@ function AccountScreen({ user, onSignOut, onSwitchMode, onOpenChooser }) {
     <div className="screenStack">
       <section className="contentCard accountCard">
         <div className="profileBadge">{user.phone.slice(-2)}</div>
-        <p className="eyebrow">Your Dular account</p>
+        <p className="eyebrow">Verified phone</p>
         <h1>{user.phone}</h1>
-        <p>Your phone number is verified and ready for M-Pesa deposits, transfers, and withdrawals.</p>
+        <p>This number is used for sign-in, Dular payments, and M-Pesa transactions.</p>
         <div className="buttonRow wrapButtons">
-          <button type="button" className="secondaryBtn" onClick={onSignOut}>Sign out</button>
-          {onSwitchMode && <button type="button" className="secondaryBtn" onClick={onSwitchMode}>Open self-custody beta</button>}
-          {onOpenChooser && <button type="button" className="ghostBtn" onClick={onOpenChooser}>Choose mode</button>}
+          <button type="button" className="secondaryBtn iconTextBtn" onClick={onSignOut}><LogOut size={17} /> Sign out</button>
+          {onSwitchMode && <button type="button" className="secondaryBtn" onClick={onSwitchMode}>Open self-custody wallet</button>}
+          {onOpenChooser && <button type="button" className="ghostBtn" onClick={onOpenChooser}>Wallet options</button>}
         </div>
       </section>
 
       <section className="contentCard">
         <div className="sectionHeader">
           <div>
-            <p className="eyebrow">Advanced</p>
-            <h2>Verification tools</h2>
+            <p className="eyebrow">Directory</p>
+            <h2>Verify a Dular number</h2>
           </div>
         </div>
-        <p className="muted">Use this when you need to prove a phone number is linked to a Dular network identity.</p>
+        <p className="muted">Check whether a phone number has a registered Dular network identity.</p>
         <form onSubmit={submit} className="lookupForm">
           <div className="formGroup">
-            <label>Phone number</label>
-            <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="0712 345 678" required />
+            <label htmlFor="lookup-phone">Phone number</label>
+            <input id="lookup-phone" type="tel" inputMode="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="0712 345 678" required />
           </div>
-          <button type="submit" className="secondaryBtn">Lookup</button>
+          <button type="submit" className="secondaryBtn iconTextBtn"><Search size={17} /> Verify</button>
         </form>
         <Status state={status} />
         {lookup && (
@@ -693,25 +728,25 @@ function WalletApp({ user, onRefresh, onSignOut, onSwitchMode, onOpenChooser }) 
     <main className="appShell">
       <header className="appTopbar">
         <div className="brandLockup">
-          <div className="brandMark small">D</div>
+          <BrandMark small />
           <div>
             <strong>Dular</strong>
-            <span>{user.phone}</span>
+            <span>Personal wallet · {user.phone}</span>
           </div>
         </div>
         <div className={`connectionBadge ${syncing ? 'syncing' : ''}`}>
-          <span />
-          {syncing ? 'Updating' : 'Live'}
+          {syncing ? <RefreshCw size={14} className="spin" /> : <Wifi size={14} />}
+          {syncing ? 'Syncing' : 'Connected'}
         </div>
       </header>
 
       <div className="desktopNav">
-        {NAV_ITEMS.map((item) => (
+        {NAV_ITEMS.map(({ Icon, ...item }) => (
           <button type="button" className={tab === item.id ? 'active' : ''} key={item.id} onClick={() => setTab(item.id)}>
-            {item.label}
+            <Icon size={17} /> {item.label}
           </button>
         ))}
-        <button type="button" className={tab === 'activity' ? 'active' : ''} onClick={() => setTab('activity')}>Activity</button>
+        <button type="button" className={tab === 'activity' ? 'active' : ''} onClick={() => setTab('activity')}><History size={17} /> Activity</button>
       </div>
 
       <section className="phoneFrame">
@@ -724,9 +759,9 @@ function WalletApp({ user, onRefresh, onSignOut, onSwitchMode, onOpenChooser }) 
       </section>
 
       <nav className="bottomNav" aria-label="Primary navigation">
-        {NAV_ITEMS.map((item) => (
+        {NAV_ITEMS.map(({ Icon, ...item }) => (
           <button type="button" className={tab === item.id ? 'active' : ''} key={item.id} onClick={() => setTab(item.id)}>
-            <span>{item.icon}</span>
+            <Icon size={20} />
             {item.label}
           </button>
         ))}
@@ -774,8 +809,8 @@ export default function MilestoneOneApp({ onSwitchMode = null, onOpenChooser = n
   if (booting) {
     return (
       <div className="bootScreen">
-        <div className="brandMark">D</div>
-        <p>Opening your wallet...</p>
+        <BrandMark />
+        <p>Loading your wallet...</p>
       </div>
     )
   }

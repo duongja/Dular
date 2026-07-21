@@ -1,5 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  ArrowDownLeft,
+  ArrowRight,
+  ArrowUpRight,
+  Check,
+  CheckCircle2,
+  CircleAlert,
+  Clock3,
+  Copy,
+  ExternalLink,
+  Home,
+  KeyRound,
+  Landmark,
+  LockKeyhole,
+  LogOut,
+  Network,
+  RefreshCw,
+  SendHorizontal,
+  ShieldCheck,
+  Smartphone,
+  WalletCards,
+  Wifi,
+} from 'lucide-react'
+import {
   browserAcceptChannel,
   browserAbandonChannel,
   browserConnectPeer,
@@ -21,12 +44,21 @@ import {
   loadWalletRecord,
   unlockWalletRecord,
 } from './lib/browserWalletStore.js'
+import BrandMark from './BrandMark.jsx'
+import heroArt from './assets/hero.png'
 import './App.css'
 
 const RUSD_BASE = 100000000n
 const MIN_OPERATOR_CHANNEL_CAPACITY = 200n * 100000000n
 const CKB_TESTNET_FAUCET_URL = 'https://faucet.nervos.org/'
 const RUSD_TESTNET_FAUCET_URL = 'https://testnet0815.stablepp.xyz/stablecoin'
+const SELF_CUSTODY_NAV_ITEMS = [
+  { id: 'home', label: 'Dashboard', Icon: Home },
+  { id: 'fund', label: 'Fund', Icon: Landmark },
+  { id: 'receive', label: 'Receive', Icon: ArrowDownLeft },
+  { id: 'send', label: 'Send', Icon: ArrowUpRight },
+  { id: 'wallet', label: 'Wallet', Icon: WalletCards },
+]
 
 function token() {
   return localStorage.getItem('dular_token') || ''
@@ -109,7 +141,13 @@ function errorMessage(error, fallback) {
 
 function Status({ state }) {
   if (!state) return null
-  return <div className={`statusMessage ${state.type}`}>{state.message}</div>
+  const Icon = state.type === 'success' ? CheckCircle2 : state.type === 'error' ? CircleAlert : Clock3
+  return (
+    <div className={`statusMessage ${state.type}`} role={state.type === 'error' ? 'alert' : 'status'} aria-live="polite">
+      <Icon size={18} aria-hidden="true" />
+      <span>{state.message}</span>
+    </div>
+  )
 }
 
 function isMissingTempChannelError(error) {
@@ -128,10 +166,6 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function scrollToPanel(id) {
-  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
-
 function CopyButton({ value, label = 'Copy' }) {
   const [copied, setCopied] = useState(false)
 
@@ -144,6 +178,7 @@ function CopyButton({ value, label = 'Copy' }) {
 
   return (
     <button type="button" className="copyBtn" onClick={copy} disabled={!value}>
+      {copied ? <Check size={17} /> : <Copy size={17} />}
       {copied ? 'Copied' : label}
     </button>
   )
@@ -160,12 +195,19 @@ function ProofDrawer({ summary = 'Advanced details', children }) {
 
 function WalletHero() {
   return (
-    <section className="flowHero selfCustodyHero">
-      <p className="eyebrow">Dular beta</p>
-      <h1>Self-custody payments, tested with faucet funds.</h1>
-      <p>
-        Your phone number identifies you. Your keys stay on this device. For this beta, fund the wallet externally with testnet CKB and RUSD before sending.
-      </p>
+    <section className="authHero selfCustodyHero">
+      <div className="authBrand"><BrandMark /><strong>Dular</strong><span>Testnet</span></div>
+      <img className="fiberHeroArt" src={heroArt} alt="Fiber payment layers" />
+      <div className="authHeroContent">
+        <p className="eyebrow">Self-custody wallet</p>
+        <h1>Your keys. Direct RUSD payments.</h1>
+        <p>Your wallet keys stay encrypted on this device. Use testnet funds to try payments over Fiber.</p>
+        <div className="authFeatureList" aria-label="Wallet features">
+          <span><KeyRound size={18} /> Device-held wallet keys</span>
+          <span><Network size={18} /> Direct Fiber payments</span>
+          <span><ShieldCheck size={18} /> PIN-protected local storage</span>
+        </div>
+      </div>
     </section>
   )
 }
@@ -190,7 +232,7 @@ function AuthGate({ onAuth }) {
       setPhone(result.phone)
       setDemoCode(result.demoCode || '')
       setStep('code')
-      setStatus({ type: 'success', message: 'Code sent. Continue to unlock or create your device wallet.' })
+      setStatus({ type: 'success', message: 'SMS code sent. Enter it to continue to your device wallet.' })
     } catch (error) {
       setStatus({ type: 'error', message: error.message })
     } finally {
@@ -223,26 +265,26 @@ function AuthGate({ onAuth }) {
         {step === 'phone' ? (
           <form onSubmit={requestOtp}>
             <span className="stepPill">Step 1 of 2</span>
-            <h2>Enter your phone</h2>
-            <p className="muted">Use the same number you use for mobile money. This is how people find you on Dular.</p>
+            <h2>Sign in to Dular</h2>
+            <p className="muted">Your verified number connects your Dular profile to this device wallet.</p>
             <div className="formGroup">
-              <label>Phone number</label>
-              <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="0712 345 678" required />
+              <label htmlFor="self-phone">Phone number</label>
+              <input id="self-phone" type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="0712 345 678" required />
             </div>
-            <button type="submit" className="primaryBtn fullWidth" disabled={loading}>{loading ? 'Sending code...' : 'Send secure code'}</button>
+            <button type="submit" className="primaryBtn fullWidth" disabled={loading}>{loading ? 'Sending SMS code...' : 'Send SMS code'}<ArrowRight size={18} /></button>
           </form>
         ) : (
           <form onSubmit={verifyOtp}>
             <span className="stepPill">Step 2 of 2</span>
-            <h2>Confirm it is you</h2>
-            <p className="muted">Enter the 6-digit code sent to {phone}. {demoCode ? `Use code ${demoCode} for local testing.` : ''}</p>
+            <h2>Enter your SMS code</h2>
+            <p className="muted">We sent a 6-digit code to {phone}. {demoCode ? `Demo code: ${demoCode}` : ''}</p>
             <div className="formGroup">
-              <label>Secure code</label>
-              <input value={code} onChange={(event) => setCode(event.target.value)} placeholder="123456" required />
+              <label htmlFor="self-code">6-digit code</label>
+              <input id="self-code" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value)} placeholder="123456" required />
             </div>
             <div className="buttonRow">
               <button type="button" className="secondaryBtn" onClick={() => setStep('phone')}>Change number</button>
-              <button type="submit" className="primaryBtn" disabled={loading}>{loading ? 'Verifying...' : 'Open wallet'}</button>
+              <button type="submit" className="primaryBtn" disabled={loading}>{loading ? 'Verifying...' : 'Continue'}<ArrowRight size={18} /></button>
             </div>
           </form>
         )}
@@ -269,28 +311,29 @@ function SetupCard({ phone, onCreate, onUnlock, hasExistingWallet, loading, stat
   return (
     <div className="screenStack">
       <section className="contentCard">
-        <p className="eyebrow">Wallet security</p>
-        <h1>{hasExistingWallet ? 'Unlock your wallet' : 'Create your device wallet'}</h1>
+        <div className="sectionIcon"><LockKeyhole size={20} /></div>
+        <p className="eyebrow">Device security</p>
+        <h1>{hasExistingWallet ? 'Unlock this wallet' : 'Create a device wallet'}</h1>
         <p className="muted">
-          This PIN protects the wallet stored in this browser. Keep this device and PIN safe; clearing browser data can remove this test wallet.
+          Your PIN encrypts the wallet stored in this browser. Dular cannot recover this test wallet if its browser data is cleared.
         </p>
         {hasExistingWallet ? (
           <form onSubmit={unlockWallet}>
             <div className="formGroup">
-              <label>Wallet PIN</label>
-              <input type="password" value={pin} onChange={(event) => setPin(event.target.value)} placeholder="4+ digits" required />
+              <label htmlFor="unlock-pin">Wallet PIN</label>
+              <input id="unlock-pin" type="password" inputMode="numeric" autoComplete="current-password" value={pin} onChange={(event) => setPin(event.target.value)} placeholder="At least 4 digits" required />
             </div>
             <button type="submit" className="primaryBtn fullWidth" disabled={loading}>{loading ? 'Unlocking...' : `Unlock ${phone}`}</button>
           </form>
         ) : (
           <form onSubmit={createWallet}>
             <div className="formGroup">
-              <label>Create wallet PIN</label>
-              <input type="password" value={pin} onChange={(event) => setPin(event.target.value)} placeholder="4+ digits" required />
+              <label htmlFor="create-pin">Create wallet PIN</label>
+              <input id="create-pin" type="password" inputMode="numeric" autoComplete="new-password" value={pin} onChange={(event) => setPin(event.target.value)} placeholder="At least 4 digits" required />
             </div>
             <div className="formGroup">
-              <label>Confirm PIN</label>
-              <input type="password" value={confirmPin} onChange={(event) => setConfirmPin(event.target.value)} placeholder="Repeat PIN" required />
+              <label htmlFor="confirm-pin">Confirm wallet PIN</label>
+              <input id="confirm-pin" type="password" inputMode="numeric" autoComplete="new-password" value={confirmPin} onChange={(event) => setConfirmPin(event.target.value)} placeholder="Enter the same PIN" required />
             </div>
             <button type="submit" className="primaryBtn fullWidth" disabled={loading}>{loading ? 'Creating wallet...' : 'Create wallet'}</button>
           </form>
@@ -316,6 +359,7 @@ function SelfCustodyDashboard({
   onSignOut,
   onRefreshNetwork,
 }) {
+  const [tab, setTab] = useState('home')
   const readyChannels = (channels?.channels || []).filter(isReadyChannel)
   const spendableBaseUnits = sumChannelBalance(readyChannels)
   const spendableBalance = formatRUsd(spendableBaseUnits)
@@ -326,89 +370,119 @@ function SelfCustodyDashboard({
   const hasOnChainFunds = onChainRUsdBaseUnits > 0n
   const betaPhase = hasSpendableFunds ? 'ready' : hasOnChainFunds ? 'activate' : 'fund'
   const betaCopy = {
-    fund: 'Start by sending testnet CKB and RUSD from external faucets to this wallet address.',
-    activate: 'Your faucet RUSD is on-chain. Activate it into a Fiber channel to make it spendable.',
-    ready: 'Your wallet has spendable RUSD. You can send or create a payment request now.',
+    fund: 'Add testnet CKB and RUSD from the faucets to begin.',
+    activate: 'On-chain RUSD detected. Move it into a Fiber channel before spending.',
+    ready: 'Your RUSD is ready for Fiber payments.',
   }[betaPhase]
   const channelCount = readyChannels.length
   const peerCount = peers?.peers?.length || 0
+
+  function openTab(nextTab) {
+    setTab(nextTab)
+    window.scrollTo(0, 0)
+  }
 
   return (
     <main className="appShell">
       <header className="appTopbar">
         <div className="brandLockup">
-          <div className="brandMark small">D</div>
+          <BrandMark small />
           <div>
-            <strong>Dular Beta</strong>
-            <span>{user.phone}</span>
+            <strong>Dular</strong>
+            <span>Self-custody testnet · {user.phone}</span>
           </div>
         </div>
         <div className={`connectionBadge ${walletStatus === 'ready' ? '' : 'syncing'}`}>
-          <span />
-          {walletStatus === 'ready' ? 'Live' : walletStatus}
+          {walletStatus === 'ready' ? <Wifi size={14} /> : <RefreshCw size={14} className="spin" />}
+          {walletStatus === 'ready' ? 'Connected' : 'Starting'}
         </div>
       </header>
 
-      <section className="phoneFrame">
-        <div className="screenStack">
+      <div className="selfCustodyWorkspace">
+        <nav className="desktopNav selfCustodyNav" aria-label="Wallet sections">
+          {SELF_CUSTODY_NAV_ITEMS.map(({ id, label, Icon }) => (
+            <button
+              type="button"
+              className={tab === id ? 'active' : ''}
+              aria-current={tab === id ? 'page' : undefined}
+              key={id}
+              onClick={() => openTab(id)}
+            >
+              <Icon size={17} /> {label}
+            </button>
+          ))}
+        </nav>
+
+        <section className="phoneFrame selfCustodyFrame">
+        <section className="walletPanel" role="tabpanel" aria-label="Wallet dashboard" hidden={tab !== 'home'}>
+          <div className="screenStack">
           <section className="balanceCard walletBalanceCard">
             <div className="balanceTopline">
-              <span>Ready to spend</span>
-              <button type="button" className="ghostBtn" onClick={() => onRefreshNetwork()} disabled={refreshingNetwork}>
-                {refreshingNetwork ? 'Checking...' : 'Sync'}
+              <span>Spendable balance</span>
+              <button type="button" className="ghostBtn iconTextBtn" onClick={() => onRefreshNetwork()} disabled={refreshingNetwork}>
+                <RefreshCw size={16} className={refreshingNetwork ? 'spin' : ''} /> {refreshingNetwork ? 'Updating' : 'Update'}
               </button>
             </div>
             <strong>{spendableBalance}</strong>
             <div className="balanceBreakdown">
-              <span>Waiting on-chain</span>
+              <span>On-chain, not spendable</span>
               <strong>{onChainRUsdBalance}</strong>
             </div>
             <p>{betaCopy}</p>
             <div className="heroActionRow">
               {betaPhase === 'fund' && walletAddress && (
-                <CopyButton value={walletAddress} label="Copy wallet address" />
+                <CopyButton value={walletAddress} label="Copy address" />
               )}
               {betaPhase === 'fund' && (
-                <button type="button" className="secondaryBtn" onClick={() => scrollToPanel('add-funds')}>
-                  Open faucets
+                <button type="button" className="secondaryBtn" onClick={() => openTab('fund')}>
+                  Open faucet steps
                 </button>
               )}
               {betaPhase === 'activate' && (
-                <button type="button" className="secondaryBtn fullWidth" onClick={() => scrollToPanel('add-funds')}>
-                  Activate RUSD
+                <button type="button" className="secondaryBtn fullWidth" onClick={() => openTab('fund')}>
+                  Make RUSD spendable
                 </button>
               )}
               {betaPhase === 'ready' && (
                 <>
-                  <button type="button" className="secondaryBtn" onClick={() => scrollToPanel('send')}>
-                    Send
+                  <button type="button" className="secondaryBtn" onClick={() => openTab('send')}>
+                    <ArrowUpRight size={17} /> Send
                   </button>
-                  <button type="button" className="secondaryBtn" onClick={() => scrollToPanel('receive')}>
-                    Receive
+                  <button type="button" className="secondaryBtn" onClick={() => openTab('receive')}>
+                    <ArrowDownLeft size={17} /> Receive
                   </button>
                 </>
               )}
             </div>
             <div className="networkSnapshot">
-              <span>{channelCount} channel{channelCount === 1 ? '' : 's'}</span>
-              <span>{peerCount} peer{peerCount === 1 ? '' : 's'}</span>
-              {lastNetworkRefreshAt && <span>{lastNetworkRefreshAt}</span>}
+              <span><Network size={14} /> {channelCount} ready channel{channelCount === 1 ? '' : 's'}</span>
+              <span>{peerCount} network peer{peerCount === 1 ? '' : 's'}</span>
+              {lastNetworkRefreshAt && <span>Updated {lastNetworkRefreshAt}</span>}
             </div>
             <Status state={networkStatus} />
           </section>
 
           <BetaFlowCard phase={betaPhase} />
+          </div>
+        </section>
 
-          <section id="add-funds" className="contentCard mobileActionCard">
+        <section className="walletPanel" role="tabpanel" aria-label="Fund wallet" hidden={tab !== 'fund'}>
+          <div className="screenStack">
+            <section className="flowHero">
+              <p className="eyebrow">Fund</p>
+              <h1>Fund your wallet</h1>
+              <p>Add testnet assets, confirm they arrived, and move RUSD into a Fiber channel.</p>
+            </section>
+            <section className="contentCard mobileActionCard">
             <div className="sectionHeader">
               <div>
-                <p className="eyebrow">Step 1</p>
-                <h2>Fund from faucets</h2>
+                <p className="eyebrow">Step 1 · Testnet funds</p>
+                <h2>Your funding address</h2>
               </div>
-              <span className="safePill">External only</span>
+              <span className="safePill"><ExternalLink size={14} /> External faucets</span>
             </div>
             <p className="muted">
-              Dular does not fund beta wallets internally. Send testnet CKB and RUSD from the faucets to the address below, then sync this wallet.
+              Send testnet CKB and RUSD from the external faucets to your address, then update the wallet balance.
             </p>
             <FundingAddressCard
               walletAddress={walletAddress}
@@ -423,40 +497,55 @@ function SelfCustodyDashboard({
               operatorInfo={operatorInfo}
               onRefreshNetwork={onRefreshNetwork}
             />
-          </section>
+            </section>
+          </div>
+        </section>
 
-          <section id="receive" className="contentCard mobileActionCard">
+        <section className="walletPanel" role="tabpanel" aria-label="Receive RUSD" hidden={tab !== 'receive'}>
+          <div className="screenStack">
+            <section className="flowHero">
+              <p className="eyebrow">Receive</p>
+              <h1>Create a payment request</h1>
+              <p>Set an amount and share the request with another Dular wallet.</p>
+            </section>
+            <section className="contentCard mobileActionCard">
+              <ReceiveCard nodeInfo={nodeInfo} onRefreshNetwork={onRefreshNetwork} />
+            </section>
+          </div>
+        </section>
+
+        <section className="walletPanel" role="tabpanel" aria-label="Send RUSD" hidden={tab !== 'send'}>
+          <div className="screenStack">
+            <section className="flowHero">
+              <p className="eyebrow">Send</p>
+              <h1>Pay a request</h1>
+              <p>Paste a payment request and send from your spendable RUSD balance.</p>
+            </section>
+            <section className="contentCard mobileActionCard">
+              <PayInvoiceCard onRefreshNetwork={onRefreshNetwork} />
+            </section>
+          </div>
+        </section>
+
+        <section className="walletPanel" role="tabpanel" aria-label="Wallet security" hidden={tab !== 'wallet'}>
+          <div className="screenStack">
+            <section className="flowHero">
+              <p className="eyebrow">Wallet</p>
+              <h1>Security and access</h1>
+              <p>Review this device wallet, inspect its network identity, or end your session.</p>
+            </section>
+            <section className="contentCard safetyCard">
             <div className="sectionHeader">
               <div>
-                <p className="eyebrow">Step 3</p>
-                <h2>Receive RUSD</h2>
+                <p className="eyebrow">Device wallet</p>
+                <h2>This browser</h2>
               </div>
-            </div>
-            <ReceiveCard nodeInfo={nodeInfo} onRefreshNetwork={onRefreshNetwork} />
-          </section>
-
-          <section id="send" className="contentCard mobileActionCard">
-            <div className="sectionHeader">
-              <div>
-                <p className="eyebrow">Step 3</p>
-                <h2>Send RUSD</h2>
-              </div>
-            </div>
-            <PayInvoiceCard onRefreshNetwork={onRefreshNetwork} />
-          </section>
-
-          <section id="wallet-safety" className="contentCard safetyCard">
-            <div className="sectionHeader">
-              <div>
-                <p className="eyebrow">Wallet</p>
-                <h2>Keep it safe</h2>
-              </div>
-              <span className="safePill">Keys on device</span>
+              <span className="safePill"><KeyRound size={14} /> Keys on device</span>
             </div>
             <div className="safetyList">
-              <span>This beta wallet is stored in this browser and protected by your PIN.</span>
-              <span>Keep the tab open while opening channels, sending, or receiving.</span>
-              <span>Do not clear browser data unless you are ready to reset this test wallet.</span>
+              <span><ShieldCheck size={18} /> Your wallet is encrypted in this browser with your PIN.</span>
+              <span><Smartphone size={18} /> Keep this tab open while a channel or payment is processing.</span>
+              <span><CircleAlert size={18} /> Clearing browser data permanently removes this test wallet.</span>
             </div>
             <ProofDrawer summary="Wallet technical details">
               <ProofRow label="Phone" value={user.phone} />
@@ -469,29 +558,27 @@ function SelfCustodyDashboard({
               <ProofRow label="Spendable RUSD" value={spendableBalance} />
             </ProofDrawer>
             <div className="buttonRow wrapButtons">
-              <button type="button" className="secondaryBtn" onClick={onLock}>Lock wallet</button>
-              <button type="button" className="secondaryBtn" onClick={onSignOut}>Sign out</button>
+              <button type="button" className="secondaryBtn iconTextBtn" onClick={onLock}><LockKeyhole size={17} /> Lock wallet</button>
+              <button type="button" className="secondaryBtn iconTextBtn" onClick={onSignOut}><LogOut size={17} /> Sign out</button>
             </div>
-          </section>
-        </div>
-      </section>
-      <nav className="bottomNav" aria-label="Wallet actions">
-        <button type="button" onClick={() => scrollToPanel('add-funds')}>
-          <span>+</span>
-          Fund
-        </button>
-        <button type="button" onClick={() => scrollToPanel('receive')}>
-          <span>in</span>
-          Receive
-        </button>
-        <button type="button" onClick={() => scrollToPanel('send')}>
-          <span>out</span>
-          Send
-        </button>
-        <button type="button" onClick={() => scrollToPanel('wallet-safety')}>
-          <span>ok</span>
-          Wallet
-        </button>
+            </section>
+          </div>
+        </section>
+        </section>
+      </div>
+      <nav className="bottomNav" aria-label="Wallet navigation">
+        {SELF_CUSTODY_NAV_ITEMS.map(({ id, label, Icon }) => (
+          <button
+            type="button"
+            className={tab === id ? 'active' : ''}
+            aria-current={tab === id ? 'page' : undefined}
+            key={id}
+            onClick={() => openTab(id)}
+          >
+            <Icon size={20} />
+            {label}
+          </button>
+        ))}
       </nav>
     </main>
   )
@@ -501,18 +588,18 @@ function BetaFlowCard({ phase }) {
   const steps = [
     {
       key: 'fund',
-      title: 'Fund externally',
-      text: 'Use testnet CKB and RUSD faucets.',
+      title: 'Add testnet funds',
+      text: 'Use the CKB and RUSD faucets.',
     },
     {
       key: 'activate',
-      title: 'Activate balance',
-      text: 'Open a Fiber channel from this wallet.',
+      title: 'Make RUSD spendable',
+      text: 'Move on-chain RUSD into a Fiber channel.',
     },
     {
       key: 'ready',
-      title: 'Send or receive',
-      text: 'Pay requests between browser wallets.',
+      title: 'Make a payment',
+      text: 'Send or receive RUSD from another wallet.',
     },
   ]
   const phaseIndex = steps.findIndex((step) => step.key === phase)
@@ -521,8 +608,8 @@ function BetaFlowCard({ phase }) {
     <section className="contentCard betaFlowCard">
       <div className="sectionHeader">
         <div>
-          <p className="eyebrow">Beta flow</p>
-          <h2>What to do next</h2>
+          <p className="eyebrow">Wallet setup</p>
+          <h2>Payment readiness</h2>
         </div>
       </div>
       <div className="betaSteps">
@@ -547,28 +634,28 @@ function FundingAddressCard({ walletAddress, funding, onRefreshNetwork, refreshi
   return (
     <div className="fundingAddressCard">
       <div>
-        <span>Your testnet address</span>
+        <span>Your wallet address</span>
         <code>{walletAddress || 'Starting wallet...'}</code>
       </div>
       <div className="buttonRow wrapButtons">
         {walletAddress && <CopyButton value={walletAddress} label="Copy address" />}
         <a className="secondaryBtn" href={CKB_TESTNET_FAUCET_URL} target="_blank" rel="noreferrer">
-          CKB faucet
+          CKB faucet <ExternalLink size={15} />
         </a>
         <a className="secondaryBtn" href={RUSD_TESTNET_FAUCET_URL} target="_blank" rel="noreferrer">
-          RUSD faucet
+          RUSD faucet <ExternalLink size={15} />
         </a>
         <button type="button" className="ghostBtn" onClick={() => onRefreshNetwork()} disabled={refreshingNetwork}>
-          {refreshingNetwork ? 'Syncing...' : 'I funded it'}
+          <RefreshCw size={16} className={refreshingNetwork ? 'spin' : ''} /> {refreshingNetwork ? 'Checking balance' : 'Check faucet balance'}
         </button>
       </div>
       <div className="fundingMetrics">
         <div>
-          <span>CKB detected</span>
+          <span>On-chain CKB</span>
           <strong>{funding?.capacity || '0 CKB'}</strong>
         </div>
         <div>
-          <span>RUSD detected</span>
+          <span>On-chain RUSD</span>
           <strong>{funding?.rusdBaseUnits ? formatRUsd(funding.rusdBaseUnits) : '0 RUSD'}</strong>
         </div>
       </div>
@@ -596,7 +683,7 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
       return
     }
     if (!operatorPubkey) {
-      setStatus({ type: 'error', message: 'Dular operator is not connected yet. Tap Sync and try again.' })
+      setStatus({ type: 'error', message: 'Dular operator is not connected yet. Update the wallet and try again.' })
       return
     }
 
@@ -637,7 +724,7 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
         operatorAutoAcceptMinimum: currentOperatorMinimum.toString(),
       }))
       if (operatorCapacity < MIN_OPERATOR_CHANNEL_CAPACITY) {
-        throw new Error(`Dular operator needs testnet CKB capacity before it can accept this channel. Current operator balance is ${operatorStatus.ckbCapacity}. Send at least 200 CKB to ${operatorStatus.fundingAddress}, tap Sync, then retry.`)
+        throw new Error(`Dular operator needs testnet CKB capacity before it can accept this channel. Current operator balance is ${operatorStatus.ckbCapacity}. Send at least 200 CKB to ${operatorStatus.fundingAddress}, update the wallet, then retry.`)
       }
       if (currentOperatorMinimum > 0n && fundingAmountBaseUnits < currentOperatorMinimum) {
         throw new Error(`Minimum self-funded channel amount is ${formatRUsd(currentOperatorMinimum)} on the current operator node. Add more RUSD or retry with at least that amount.`)
@@ -696,7 +783,7 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
         message: finalChannel
           ? `${formatRUsd(fundingAmountBaseUnits)} self-funded channel is ready. You can now send from this wallet.`
           : finalFundedPending
-            ? 'The funding transaction is visible on-chain. Keep this tab open and tap Sync shortly; the channel should become ready after CKB confirmation.'
+            ? 'The funding transaction is visible on-chain. Keep this tab open and update the wallet shortly; the channel should become ready after CKB confirmation.'
             : 'The self-funded channel is still negotiating and no funding outpoint is visible yet. Clear the temporary channel and retry if this does not change.',
       })
     } catch (error) {
@@ -727,33 +814,33 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
     <div className="topUpPanel">
       <div className="activationCard">
         <div>
-          <p className="eyebrow">Step 2</p>
+          <p className="eyebrow">Step 2 · Fiber channel</p>
           <h3>Make RUSD spendable</h3>
           <p>
-            Faucet RUSD lands on-chain first. Activate the amount you want to spend by opening a Fiber channel from this browser wallet.
+            Move the amount you want to spend from your on-chain balance into a Fiber payment channel.
           </p>
         </div>
         <form onSubmit={submit}>
           <div className="formGroup">
-            <label>Amount to activate</label>
+            <label htmlFor="activation-amount">Amount to make spendable</label>
             <div className="amountField">
-              <input value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" placeholder="1.00" required />
+              <input id="activation-amount" value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" placeholder="1.00" required />
               <span>RUSD</span>
             </div>
             <p className="inputHint">Detected on-chain: {detectedRUsd}</p>
           </div>
           <button type="submit" className="primaryBtn fullWidth" disabled={loading || !nodeInfo?.pubkey}>
-            {loading ? 'Activating...' : 'Activate RUSD'}
+            {loading ? 'Opening Fiber channel...' : 'Make RUSD spendable'}
           </button>
         </form>
         <ProofDrawer summary="Activation details">
           <ProofRow label="Your CKB/RUSD address" value={walletAddress || 'Loading...'} />
-          <ProofRow label="On-chain CKB" value={funding?.capacity || 'Tap Sync after funding'} />
-          <ProofRow label="On-chain RUSD" value={funding?.rusdBaseUnits ? formatRUsd(funding.rusdBaseUnits) : 'Tap Sync after funding'} />
+          <ProofRow label="On-chain CKB" value={funding?.capacity || 'Update after funding'} />
+          <ProofRow label="On-chain RUSD" value={funding?.rusdBaseUnits ? formatRUsd(funding.rusdBaseUnits) : 'Update after funding'} />
           <ProofRow label="Channel peer" value={operatorPubkey || 'Connecting'} />
-          <ProofRow label="Operator CKB address" value={operatorInfo?.fundingAddress || 'Sync to load'} />
-          <ProofRow label="Operator CKB capacity" value={operatorInfo?.ckbCapacity || 'Sync to load'} />
-          <ProofRow label="Minimum channel" value={operatorAutoAcceptMinimum > 0n ? formatRUsd(operatorAutoAcceptMinimum) : 'Sync to load'} />
+          <ProofRow label="Operator CKB address" value={operatorInfo?.fundingAddress || 'Update to load'} />
+          <ProofRow label="Operator CKB capacity" value={operatorInfo?.ckbCapacity || 'Update to load'} />
+          <ProofRow label="Minimum channel" value={operatorAutoAcceptMinimum > 0n ? formatRUsd(operatorAutoAcceptMinimum) : 'Update to load'} />
         </ProofDrawer>
       </div>
       <Status state={status} />
@@ -830,7 +917,7 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
       if (result.nextAction === 'fund_operator_rusd') {
         setStatus({
           type: 'warning',
-          message: `Dular's testnet operator needs RUSD liquidity before it can prepare this receive route. Send at least ${formatRUsd(fundingAmountBaseUnits)} to the operator funding address shown below, then prepare again.`,
+          message: `Dular's testnet operator needs RUSD liquidity before it can prepare this receive route. Send at least ${formatRUsd(fundingAmountBaseUnits)} to the operator funding address shown below, then check the receive route again.`,
         })
         return
       }
@@ -857,7 +944,7 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
         if (result.nextAction === 'fund_operator_rusd') {
           setStatus({
             type: 'warning',
-            message: `Dular's testnet operator needs RUSD liquidity before it can finish this receive route. Send at least ${formatRUsd(fundingAmountBaseUnits)} to the operator funding address shown below, then prepare again.`,
+            message: `Dular's testnet operator needs RUSD liquidity before it can finish this receive route. Send at least ${formatRUsd(fundingAmountBaseUnits)} to the operator funding address shown below, then check the receive route again.`,
           })
           return
         }
@@ -868,7 +955,7 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
         type: result.hopHints?.length ? 'success' : 'warning',
         message: result.hopHints?.length
           ? 'Ready to receive. Share this request with the sender.'
-          : 'Request created, but the receive route is still becoming ready. Keep this wallet open and tap Prepare again shortly.',
+          : 'Request created, but the receive route is still becoming ready. Keep this wallet open and check the receive route again shortly.',
       })
     } catch (error) {
       setStatus({ type: 'error', message: error.message || 'Could not prepare this payment request.' })
@@ -902,22 +989,22 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
   return (
     <>
       <p className="muted receiveNote">
-        Create a payment request, keep this wallet open, then share the request with another Dular browser wallet.
+        Create a request and share it with the sender. Keep this wallet open until the payment completes.
       </p>
       <form onSubmit={submit}>
         <div className="formGroup">
-          <label>Amount to receive</label>
+          <label htmlFor="receive-amount">Amount to receive</label>
           <div className="amountField">
-            <input value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" placeholder="1.00" required />
+            <input id="receive-amount" value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" placeholder="1.00" required />
             <span>RUSD</span>
           </div>
         </div>
         <div className="formGroup">
-          <label>Note</label>
-          <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Payment request" required />
+          <label htmlFor="receive-note">Payment note</label>
+          <input id="receive-note" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What is this payment for?" required />
         </div>
         <button type="submit" className="primaryBtn fullWidth" disabled={loading || !nodeInfo?.pubkey}>
-          {loading ? 'Preparing request...' : 'Create request'}
+          {loading ? 'Preparing payment request...' : 'Create payment request'}
         </button>
       </form>
       <Status state={status} />
@@ -928,16 +1015,16 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
           <div className="buttonRow wrapButtons">
             <CopyButton value={invoice.invoice_address} label="Copy request" />
             <button type="button" className="secondaryBtn" onClick={() => prepareReceivingRoute()} disabled={loading}>
-              {loading ? 'Preparing...' : 'Prepare again'}
+              {loading ? 'Checking route...' : 'Check receive route'}
             </button>
           </div>
           {needsOperatorRUsd && (
             <div className="routeHelpCard">
-              <p className="eyebrow">Route liquidity needed</p>
-              <h3>Fund the Dular route with RUSD</h3>
+              <p className="eyebrow">Network action required</p>
+              <h3>Add RUSD liquidity to the receive route</h3>
               <p>
                 This beta route needs {formatRUsd(bootstrap.requiredOutboundLiquidity || '0')} of operator-side testnet RUSD liquidity.
-                Send RUSD, not CKB, to the operator address, then tap Prepare again.
+                Send RUSD, not CKB, to the operator address, then check the receive route again.
               </p>
               <div className="buttonRow wrapButtons">
                 <a className="secondaryBtn" href={RUSD_TESTNET_FAUCET_URL} target="_blank" rel="noreferrer">
@@ -1346,11 +1433,12 @@ function PayInvoiceCard({ onRefreshNetwork }) {
     <>
       <form onSubmit={submit}>
         <p className="muted receiveNote">
-          Paste a payment request from the receiver. This sends from your spendable RUSD balance.
+          Paste the receiver's payment request. Dular will check the route and send from your spendable balance.
         </p>
         <div className="formGroup">
-          <label>Payment request</label>
+          <label htmlFor="send-request">Payment request</label>
           <textarea
+            id="send-request"
             className="textAreaField"
             value={invoice}
             onChange={(event) => setInvoice(event.target.value)}
@@ -1360,7 +1448,7 @@ function PayInvoiceCard({ onRefreshNetwork }) {
         </div>
         <div className="buttonRow wrapButtons">
           <button type="submit" className="primaryBtn fullWidth" disabled={loading}>
-            {loading ? 'Sending payment...' : 'Send RUSD'}
+            {loading ? 'Sending RUSD...' : 'Review and send RUSD'}<SendHorizontal size={18} />
           </button>
         </div>
       </form>
@@ -1394,7 +1482,7 @@ function PayInvoiceCard({ onRefreshNetwork }) {
             <p>{payment.payment_hash ? shortId(payment.payment_hash, 14) : 'Waiting for payment hash'}</p>
           </div>
           <div className="buttonRow wrapButtons">
-            <button type="button" className="secondaryBtn" onClick={refreshPayment} disabled={loading}>Refresh payment</button>
+            <button type="button" className="secondaryBtn iconTextBtn" onClick={refreshPayment} disabled={loading}><RefreshCw size={16} className={loading ? 'spin' : ''} /> Check payment</button>
             {payment.payment_hash && <CopyButton value={payment.payment_hash} label="Copy hash" />}
           </div>
           <ProofDrawer summary="Payment proof">
@@ -1708,8 +1796,8 @@ export default function SelfCustodyApp() {
   if (booting) {
     return (
       <div className="bootScreen">
-        <div className="brandMark">D</div>
-        <p>Opening self-custody wallet...</p>
+        <BrandMark />
+        <p>Loading your device wallet...</p>
       </div>
     )
   }
@@ -1723,9 +1811,9 @@ export default function SelfCustodyApp() {
       <main className="authShell">
         <WalletHero />
         <section className="authPanel">
-          <h2>Browser wallet not ready</h2>
+          <h2>This browser cannot open the wallet</h2>
           <p className="muted">
-            This wallet needs a secure, cross-origin isolated browser context before the Fiber runtime can start. Use the local Vite server or the updated deployment headers for this path.
+            Open Dular over a secure HTTPS connection in a supported browser, then try again.
           </p>
           <div className="buttonRow wrapButtons">
             <button type="button" className="secondaryBtn" onClick={signOut}>Sign out</button>
@@ -1750,7 +1838,7 @@ export default function SelfCustodyApp() {
           />
           <div className="buttonRow wrapButtons">
             <button type="button" className="secondaryBtn" onClick={signOut}>Sign out</button>
-            {walletRecord && <button type="button" className="secondaryBtn" onClick={resetLocalWallet}>Reset local wallet</button>}
+            {walletRecord && <button type="button" className="dangerBtn" onClick={resetLocalWallet}>Reset device wallet</button>}
           </div>
         </section>
       </main>

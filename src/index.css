@@ -1,7 +1,7 @@
 :root {
-  font-family: Sora, Manrope, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #10221f;
-  background: #f4f0e8;
+  font-family: "Manrope Variable", Manrope, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #18211d;
+  background: #f2f5f3;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -15,20 +15,19 @@
 html {
   min-width: 320px;
   min-height: 100%;
-  background:
-    radial-gradient(circle at 15% 10%, rgba(47, 168, 118, 0.18), transparent 28rem),
-    radial-gradient(circle at 90% 0%, rgba(14, 53, 46, 0.14), transparent 26rem),
-    #f4f0e8;
+  background: #f2f5f3;
 }
 
 body {
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -42,4 +41,6 @@ button:disabled {
 
 #root {
   width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
 }
