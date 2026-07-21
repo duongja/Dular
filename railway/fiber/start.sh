@@ -7,6 +7,7 @@ FIBER_CONFIG="${FIBER_CONFIG:-$FIBER_HOME/config.yml}"
 FIBER_CONFIG_TEMPLATE="${FIBER_CONFIG_TEMPLATE:-/usr/local/share/fiber/config/$FIBER_NETWORK/config.yml}"
 FIBER_RPC_LISTEN="${FIBER_RPC_LISTEN:-127.0.0.1:8227}"
 FIBER_P2P_LISTEN="${FIBER_P2P_LISTEN:-/ip4/127.0.0.1/tcp/8228}"
+CKB_RPC_URL="${CKB_RPC_URL:-https://testnet.ckb.dev/}"
 
 if [[ -z "${FIBER_SECRET_KEY_PASSWORD:-}" ]]; then
   echo "FIBER_SECRET_KEY_PASSWORD must be set." >&2
@@ -22,8 +23,11 @@ mkdir -p "$FIBER_HOME/ckb" "$FIBER_HOME/fiber"
 
 if [[ ! -f "$FIBER_CONFIG" ]]; then
   cp "$FIBER_CONFIG_TEMPLATE" "$FIBER_CONFIG"
-  export FIBER_CONFIG FIBER_P2P_LISTEN FIBER_RPC_LISTEN
-  node --input-type=module <<'NODE'
+  echo "Created Fiber config at $FIBER_CONFIG"
+fi
+
+export FIBER_CONFIG FIBER_P2P_LISTEN FIBER_RPC_LISTEN CKB_RPC_URL
+node --input-type=module <<'NODE'
 import fs from 'node:fs'
 
 const path = process.env.FIBER_CONFIG
@@ -38,11 +42,13 @@ config = config.replace(
   /rpc:\n(?:  #.*\n)*  listening_addr: "[^"]+"/,
   `rpc:\n  listening_addr: "${process.env.FIBER_RPC_LISTEN}"`,
 )
+config = config.replace(
+  /ckb:\n(?:  #.*\n)*  rpc_url: "[^"]+"/,
+  `ckb:\n  rpc_url: "${process.env.CKB_RPC_URL}"`,
+)
 
 fs.writeFileSync(path, config)
 NODE
-  echo "Created Fiber config at $FIBER_CONFIG"
-fi
 
 RUST_LOG="${RUST_LOG:-info}" FIBER_SECRET_KEY_PASSWORD="$FIBER_SECRET_KEY_PASSWORD" \
   fnn -c "$FIBER_CONFIG" -d "$FIBER_HOME" &
