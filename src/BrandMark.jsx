@@ -1,7 +1,7 @@
 export default function BrandMark({ small = false }) {
   return (
     <div className={`brandMark ${small ? 'small' : ''}`} aria-label="Dular">
-      <span>D</span>
+      <img src="/favicon.svg" alt="" aria-hidden="true" />
     </div>
   )
 }

@@ -317,26 +317,21 @@ a svg {
   flex: 0 0 auto;
   width: 48px;
   height: 48px;
-  display: grid;
-  place-items: center;
-  border-radius: var(--radius-lg);
-  background: var(--green);
-  color: #fff;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
-  font-size: 1.25rem;
-  font-weight: 820;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
-.authHero .brandMark {
-  background: var(--lime);
-  color: #15352d;
+.brandMark img {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .brandMark.small {
   width: 38px;
   height: 38px;
   border-radius: var(--radius-md);
-  font-size: 1rem;
 }
 
 .authPanel,
