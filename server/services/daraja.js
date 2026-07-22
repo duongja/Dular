@@ -13,6 +13,17 @@ function baseUrl() {
   return BASE_URLS[config.mpesa.environment] || BASE_URLS.production
 }
 
+function darajaRejection(message, statusCode = null) {
+  const error = new Error(message)
+  error.code = 'DARAJA_REJECTED'
+  error.statusCode = statusCode
+  return error
+}
+
+export function isDefinitiveDarajaError(error) {
+  return error?.code === 'DARAJA_REJECTED'
+}
+
 export async function requestDarajaJson(url, { method = 'GET', headers = {}, body } = {}) {
   return new Promise((resolve, reject) => {
     const request = https.request(url, { method, headers, timeout: 45000 }, (response) => {
@@ -28,7 +39,10 @@ export async function requestDarajaJson(url, { method = 'GET', headers = {}, bod
           payload = { raw: responseBody }
         }
         if (response.statusCode < 200 || response.statusCode >= 300) {
-          reject(new Error(payload.errorMessage || payload.ResponseDescription || JSON.stringify(payload)))
+          reject(darajaRejection(
+            payload.errorMessage || payload.ResponseDescription || JSON.stringify(payload),
+            response.statusCode,
+          ))
           return
         }
         resolve(payload)
@@ -103,7 +117,7 @@ export async function initiateStkPush({ phone, amountKes, accountReference, call
     }),
   })
   if (payload.ResponseCode !== '0') {
-    throw new Error(payload.errorMessage || payload.ResponseDescription || 'STK Push request failed')
+    throw darajaRejection(payload.errorMessage || payload.ResponseDescription || 'STK Push request failed')
   }
   return payload
 }

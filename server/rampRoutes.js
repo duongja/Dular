@@ -3,7 +3,12 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 import { requireAuth } from './auth.js'
 import { config } from './config.js'
 import { query, withTransaction } from './db.js'
-import { initiateB2c, initiateStkPush, queryStkPushStatus } from './services/daraja.js'
+import {
+  initiateB2c,
+  initiateStkPush,
+  isDefinitiveDarajaError,
+  queryStkPushStatus,
+} from './services/daraja.js'
 import {
   RUSD_TYPE_SCRIPT,
   createOperatorInvoice,
@@ -792,12 +797,17 @@ export function registerRampRoutes(app) {
         }, { source: 'daraja_stk_submit' })
       })
     } catch (error) {
+      const definitiveRejection = isDefinitiveDarajaError(error)
       order = await withTransaction(async (client) => {
         const currentOrder = (await client.query('SELECT * FROM ramp_orders WHERE id = $1 FOR UPDATE', [order.id])).rows[0]
-        return transitionOrder(client, currentOrder, 'mpesa_unknown', {
-          failureCode: 'STK_STATUS_UNKNOWN',
+        return transitionOrder(client, currentOrder, definitiveRejection ? 'mpesa_failed' : 'mpesa_unknown', {
+          failureCode: definitiveRejection ? 'STK_REJECTED' : 'STK_STATUS_UNKNOWN',
           failureMessage: error.message,
-        }, { source: 'daraja_stk_submit', error: error.message })
+        }, {
+          source: 'daraja_stk_submit',
+          error: error.message,
+          definitiveRejection,
+        })
       })
     }
     res.json({ order: serializeOrder(order) })
