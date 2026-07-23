@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { blake2b } from '@noble/hashes/blake2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
+import { QRCodeCanvas } from 'qrcode.react'
 import {
   ArrowDownLeft,
   ArrowLeft,
@@ -12,15 +13,20 @@ import {
   CircleAlert,
   Clock3,
   Copy,
+  Download,
   ExternalLink,
+  FileText,
   Home,
   KeyRound,
   Landmark,
+  Link2,
   LockKeyhole,
   LogOut,
   Network,
+  QrCode,
   RefreshCw,
   SendHorizontal,
+  Share2,
   ShieldCheck,
   Smartphone,
   WalletCards,
@@ -53,11 +59,18 @@ import {
 } from './lib/browserWalletStore.js'
 import { clearAuthToken, getAuthToken, setAuthToken } from './lib/authToken.js'
 import BrandMark from './BrandMark.jsx'
+import PaymentRequestScanner from './PaymentRequestScanner.jsx'
 import heroArt from './assets/hero.png'
 import {
   channelOpeningFailure,
   findChannelOpeningRecord,
 } from './lib/selfFundedChannelPolicy.js'
+import {
+  createPaymentLink,
+  extractPaymentRequest,
+  paymentRequestFromHash,
+  removePaymentRequestFromUrl,
+} from './lib/paymentRequest.js'
 import './App.css'
 
 const RUSD_BASE = 100000000n
@@ -585,8 +598,11 @@ function SelfCustodyDashboard({
   onLock,
   onSignOut,
   onRefreshNetwork,
+  paymentDeepLink,
+  onPaymentDeepLinkConsumed,
 }) {
-  const [tab, setTab] = useState('home')
+  const hasPaymentDeepLink = !paymentDeepLink.consumed && (paymentDeepLink.request || paymentDeepLink.error)
+  const [tab, setTab] = useState(hasPaymentDeepLink ? 'send' : 'home')
   const readyChannels = (channels?.channels || []).filter(isReadyChannel)
   const spendableBaseUnits = sumChannelBalance(readyChannels)
   const spendableBalance = formatRUsd(spendableBaseUnits)
@@ -765,7 +781,12 @@ function SelfCustodyDashboard({
               <p>Pay a registered Dular number directly or use a Fiber payment request.</p>
             </section>
             <section className="contentCard mobileActionCard">
-              <SendCard nodeInfo={nodeInfo} onRefreshNetwork={onRefreshNetwork} />
+              <SendCard
+                nodeInfo={nodeInfo}
+                onRefreshNetwork={onRefreshNetwork}
+                paymentDeepLink={paymentDeepLink.consumed ? { request: '', error: '' } : paymentDeepLink}
+                onPaymentDeepLinkConsumed={onPaymentDeepLinkConsumed}
+              />
             </section>
           </div>
         </section>
@@ -1976,15 +1997,59 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(false)
   const [bootstrap, setBootstrap] = useState(null)
+  const [shareFormat, setShareFormat] = useState('request')
+  const [shareStatus, setShareStatus] = useState(null)
+  const qrCanvasRef = useRef(null)
   const needsOperatorRUsd = bootstrap?.nextAction === 'fund_operator_rusd'
+  const paymentRequest = invoice?.invoice_address || ''
+  const paymentLink = paymentRequest ? createPaymentLink(paymentRequest, window.location.origin) : ''
+  const requestedAmountBaseUnits = invoice?.requestedAmountBaseUnits || invoice?.invoice?.amount || '0'
+  const requestedDescription = invoice?.requestedDescription || description
 
-  async function prepareReceivingRoute({ manageLoading = true } = {}) {
+  function selectShareFormat(format) {
+    setShareFormat(format)
+    setShareStatus(null)
+  }
+
+  function downloadPaymentQr() {
+    const canvas = qrCanvasRef.current
+    if (!canvas) return
+    const anchor = document.createElement('a')
+    anchor.download = `dular-rusd-request-${String(invoice?.payment_hash || 'payment').replace(/^0x/, '').slice(0, 12)}.png`
+    anchor.href = canvas.toDataURL('image/png')
+    anchor.click()
+    setShareStatus({ type: 'success', message: 'QR image downloaded.' })
+  }
+
+  async function sharePaymentLink() {
+    try {
+      if (typeof navigator.share === 'function') {
+        await navigator.share({
+          title: 'Dular RUSD payment request',
+          text: `${formatRUsd(requestedAmountBaseUnits)} - ${requestedDescription}`,
+          url: paymentLink,
+        })
+        setShareStatus({ type: 'success', message: 'Payment link shared.' })
+        return
+      }
+      await navigator.clipboard.writeText(paymentLink)
+      setShareStatus({ type: 'success', message: 'Payment link copied.' })
+    } catch (error) {
+      if (error.name !== 'AbortError') {
+        setShareStatus({ type: 'error', message: error.message || 'Could not share this payment link.' })
+      }
+    }
+  }
+
+  async function prepareReceivingRoute({ manageLoading = true, requestedAmountBaseUnits = '' } = {}) {
     if (!nodeInfo?.pubkey) return
     if (manageLoading) setLoading(true)
     setStatus(null)
 
     try {
-      const fundingAmountBaseUnits = toBaseUnits(amount).toString()
+      const fundingAmountBaseUnits = requestedAmountBaseUnits
+        || invoice?.requestedAmountBaseUnits
+        || toBaseUnits(amount).toString()
       let result = await requestReceiveRoute(nodeInfo.pubkey, nodeInfo.addresses || [], { fundingAmountBaseUnits })
       setBootstrap(result)
       if (result.nextAction === 'fund_operator_rusd') {
@@ -2041,17 +2106,27 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
     event.preventDefault()
     setLoading(true)
     setStatus(null)
+    setShareStatus(null)
+    setShareFormat('request')
     setInvoice(null)
     setBootstrap(null)
 
     try {
+      const amountBaseUnits = toBaseUnits(amount)
       const result = await browserCreateInvoice({
-        amountHex: toBaseUnitsHex(amount),
+        amountHex: baseUnitsHex(amountBaseUnits),
         description,
       })
-      setInvoice(result)
+      setInvoice({
+        ...result,
+        requestedAmountBaseUnits: amountBaseUnits.toString(),
+        requestedDescription: description,
+      })
       setStatus({ type: 'warning', message: 'Payment request created. Preparing it so another Dular wallet can pay...' })
-      await prepareReceivingRoute({ manageLoading: false })
+      await prepareReceivingRoute({
+        manageLoading: false,
+        requestedAmountBaseUnits: amountBaseUnits.toString(),
+      })
     } catch (error) {
       setStatus({ type: 'error', message: error.message || 'Could not create payment request.' })
     } finally {
@@ -2083,10 +2158,56 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
       <Status state={status} />
       {invoice && (
         <div className="requestCard">
-          <span className="requestLabel">Payment request</span>
-          <code>{shortId(invoice.invoice_address, 18)}</code>
+          <div className="requestFormatTabs" role="group" aria-label="Payment request format">
+            <button type="button" className={shareFormat === 'request' ? 'active' : ''} aria-pressed={shareFormat === 'request'} onClick={() => selectShareFormat('request')}>
+              <FileText size={16} /> Request
+            </button>
+            <button type="button" className={shareFormat === 'qr' ? 'active' : ''} aria-pressed={shareFormat === 'qr'} onClick={() => selectShareFormat('qr')}>
+              <QrCode size={16} /> QR code
+            </button>
+            <button type="button" className={shareFormat === 'link' ? 'active' : ''} aria-pressed={shareFormat === 'link'} onClick={() => selectShareFormat('link')}>
+              <Link2 size={16} /> Link
+            </button>
+          </div>
+          {shareFormat === 'request' && (
+            <div className="requestFormatPanel">
+              <span className="requestLabel">Fiber payment request</span>
+              <code>{shortId(paymentRequest, 18)}</code>
+              <CopyButton value={paymentRequest} label="Copy request" />
+            </div>
+          )}
+          {shareFormat === 'qr' && (
+            <div className="requestFormatPanel qrRequestPanel">
+              <div className="paymentQrCode">
+                <QRCodeCanvas
+                  ref={qrCanvasRef}
+                  value={paymentRequest}
+                  size={272}
+                  level="L"
+                  marginSize={4}
+                  title="Fiber payment request QR code"
+                />
+              </div>
+              <p>Fiber request for {formatRUsd(requestedAmountBaseUnits)}</p>
+              <button type="button" className="secondaryBtn iconTextBtn" onClick={downloadPaymentQr}>
+                <Download size={16} /> Download QR
+              </button>
+            </div>
+          )}
+          {shareFormat === 'link' && (
+            <div className="requestFormatPanel">
+              <span className="requestLabel">Dular payment link</span>
+              <code>{shortId(paymentLink, 28)}</code>
+              <div className="buttonRow wrapButtons">
+                <CopyButton value={paymentLink} label="Copy link" />
+                <button type="button" className="secondaryBtn iconTextBtn" onClick={sharePaymentLink}>
+                  <Share2 size={16} /> Share link
+                </button>
+              </div>
+            </div>
+          )}
+          <Status state={shareStatus} />
           <div className="buttonRow wrapButtons">
-            <CopyButton value={invoice.invoice_address} label="Copy request" />
             <button type="button" className="secondaryBtn" onClick={() => prepareReceivingRoute()} disabled={loading}>
               {loading ? 'Checking route...' : 'Check receive route'}
             </button>
@@ -2502,12 +2623,44 @@ async function waitForPaymentFinality(paymentHash, onUpdate) {
   return { final: false, payment: latest }
 }
 
-function PayInvoiceCard({ onRefreshNetwork }) {
-  const [invoice, setInvoice] = useState('')
+function PayInvoiceCard({
+  onRefreshNetwork,
+  initialPaymentRequest = '',
+  initialPaymentRequestError = '',
+  onInitialPaymentRequestConsumed,
+}) {
+  const [sourceMode, setSourceMode] = useState('request')
+  const [invoice, setInvoice] = useState(initialPaymentRequest)
+  const [paymentLinkInput, setPaymentLinkInput] = useState('')
   const [payment, setPayment] = useState(null)
   const [route, setRoute] = useState(null)
-  const [status, setStatus] = useState(null)
+  const [status, setStatus] = useState(initialPaymentRequestError
+    ? { type: 'error', message: initialPaymentRequestError }
+    : initialPaymentRequest
+      ? { type: 'success', message: 'Payment link opened. Review the request before sending.' }
+      : null)
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!initialPaymentRequest && !initialPaymentRequestError) return
+    onInitialPaymentRequestConsumed?.()
+  }, [initialPaymentRequest, initialPaymentRequestError, onInitialPaymentRequestConsumed])
+
+  function selectSourceMode(mode) {
+    setSourceMode(mode)
+    if (mode === 'qr') setInvoice('')
+    setPayment(null)
+    setRoute(null)
+    setStatus(null)
+  }
+
+  async function captureQrRequest(value) {
+    const request = extractPaymentRequest(value)
+    setInvoice(request)
+    setPayment(null)
+    setRoute(null)
+    setStatus({ type: 'success', message: 'QR payment request captured. Review it before sending.' })
+  }
 
   async function submit(event) {
     event.preventDefault()
@@ -2517,12 +2670,14 @@ function PayInvoiceCard({ onRefreshNetwork }) {
     setRoute(null)
 
     try {
+      const paymentInvoice = extractPaymentRequest(sourceMode === 'link' ? paymentLinkInput : invoice)
+      setInvoice(paymentInvoice)
       const latestChannels = await browserListChannels()
       const spendable = sumChannelBalance((latestChannels.channels || []).filter(isReadyChannel))
       if (spendable <= 0n) {
         throw new Error('No spendable RUSD is ready yet. Fund from faucets, activate RUSD, keep the wallet open, then try sending again.')
       }
-      const routeResult = await requestInvoiceRoute(invoice)
+      const routeResult = await requestInvoiceRoute(paymentInvoice)
       setRoute(routeResult)
       if (!routeResult.routeReady) {
         throw new Error(routeResult.reason || 'Receiver route is not ready. Ask the receiver to keep their wallet open and prepare a receiving route.')
@@ -2545,7 +2700,7 @@ function PayInvoiceCard({ onRefreshNetwork }) {
         senderRouteDiagnostics: diagnostics,
       }))
 
-      const result = await browserSendPayment(invoice, { hopHints: routeResult.hopHints || [] })
+      const result = await browserSendPayment(paymentInvoice, { hopHints: routeResult.hopHints || [] })
       setPayment(result)
       if (!result.payment_hash) {
         setStatus({ type: 'warning', message: `Payment submitted, but Fiber returned no payment hash. Status: ${paymentStatusName(result)}.` })
@@ -2594,21 +2749,60 @@ function PayInvoiceCard({ onRefreshNetwork }) {
     <>
       <form onSubmit={submit}>
         <p className="muted receiveNote">
-          Paste the receiver's payment request. Dular will check the route and send from your spendable balance.
+          Choose how you received the request. Dular will validate the Fiber route before sending.
         </p>
-        <div className="formGroup">
-          <label htmlFor="send-request">Payment request</label>
-          <textarea
-            id="send-request"
-            className="textAreaField"
-            value={invoice}
-            onChange={(event) => setInvoice(event.target.value)}
-            placeholder="Paste the request from the receiver"
-            required
-          />
+        <div className="requestInputTabs" role="group" aria-label="Payment request input format">
+          <button type="button" className={sourceMode === 'request' ? 'active' : ''} aria-pressed={sourceMode === 'request'} onClick={() => selectSourceMode('request')}>
+            <FileText size={16} /> Request
+          </button>
+          <button type="button" className={sourceMode === 'link' ? 'active' : ''} aria-pressed={sourceMode === 'link'} onClick={() => selectSourceMode('link')}>
+            <Link2 size={16} /> Link
+          </button>
+          <button type="button" className={sourceMode === 'qr' ? 'active' : ''} aria-pressed={sourceMode === 'qr'} onClick={() => selectSourceMode('qr')}>
+            <QrCode size={16} /> Scan QR
+          </button>
         </div>
+        {sourceMode === 'request' && (
+          <div className="formGroup">
+            <label htmlFor="send-request">Fiber payment request</label>
+            <textarea
+              id="send-request"
+              className="textAreaField"
+              value={invoice}
+              onChange={(event) => setInvoice(event.target.value)}
+              placeholder="Paste the request from the receiver"
+              required
+            />
+          </div>
+        )}
+        {sourceMode === 'link' && (
+          <div className="formGroup">
+            <label htmlFor="send-payment-link">Dular payment link</label>
+            <input
+              id="send-payment-link"
+              type="url"
+              inputMode="url"
+              autoComplete="url"
+              value={paymentLinkInput}
+              onChange={(event) => setPaymentLinkInput(event.target.value)}
+              placeholder="https://dular.app/#pay=fibt1..."
+              required
+            />
+          </div>
+        )}
+        {sourceMode === 'qr' && (
+          <div className="qrPaymentInput">
+            <PaymentRequestScanner onScan={captureQrRequest} />
+            {invoice && (
+              <div className="scannedRequest">
+                <span>Scanned Fiber request</span>
+                <code>{shortId(invoice, 18)}</code>
+              </div>
+            )}
+          </div>
+        )}
         <div className="buttonRow wrapButtons">
-          <button type="submit" className="primaryBtn fullWidth" disabled={loading}>
+          <button type="submit" className="primaryBtn fullWidth" disabled={loading || (sourceMode === 'qr' && !invoice)}>
             {loading ? 'Sending RUSD...' : 'Review and send RUSD'}<SendHorizontal size={18} />
           </button>
         </div>
@@ -2878,8 +3072,8 @@ function PhonePaymentCard({ nodeInfo, onRefreshNetwork }) {
   )
 }
 
-function SendCard({ nodeInfo, onRefreshNetwork }) {
-  const [mode, setMode] = useState('phone')
+function SendCard({ nodeInfo, onRefreshNetwork, paymentDeepLink, onPaymentDeepLinkConsumed }) {
+  const [mode, setMode] = useState(paymentDeepLink.request || paymentDeepLink.error ? 'invoice' : 'phone')
 
   return (
     <>
@@ -2894,7 +3088,14 @@ function SendCard({ nodeInfo, onRefreshNetwork }) {
       <div className="sendModeBody">
         {mode === 'phone'
           ? <PhonePaymentCard nodeInfo={nodeInfo} onRefreshNetwork={onRefreshNetwork} />
-          : <PayInvoiceCard onRefreshNetwork={onRefreshNetwork} />}
+          : (
+            <PayInvoiceCard
+              onRefreshNetwork={onRefreshNetwork}
+              initialPaymentRequest={paymentDeepLink.request}
+              initialPaymentRequestError={paymentDeepLink.error}
+              onInitialPaymentRequestConsumed={onPaymentDeepLinkConsumed}
+            />
+          )}
       </div>
     </>
   )
@@ -2907,6 +3108,14 @@ function ProofRow({ label, value }) {
       <code>{value}</code>
     </div>
   )
+}
+
+function readPaymentDeepLink() {
+  try {
+    return { request: paymentRequestFromHash(window.location.hash), error: '', consumed: false }
+  } catch (error) {
+    return { request: '', error: error.message || 'This Dular payment link is not valid.', consumed: false }
+  }
 }
 
 export default function SelfCustodyApp() {
@@ -2923,8 +3132,19 @@ export default function SelfCustodyApp() {
   const [networkStatus, setNetworkStatus] = useState(null)
   const [refreshingNetwork, setRefreshingNetwork] = useState(false)
   const [lastNetworkRefreshAt, setLastNetworkRefreshAt] = useState('')
+  const [paymentDeepLink, setPaymentDeepLink] = useState(() => ({ ...readPaymentDeepLink(), id: 1 }))
   const runtimeRef = useRef(null)
   const userId = user?.id
+
+  const consumePaymentDeepLink = useCallback(() => {
+    setPaymentDeepLink((current) => ({ ...current, consumed: true }))
+    try {
+      const nextUrl = removePaymentRequestFromUrl(window.location.href)
+      window.history.replaceState(window.history.state, '', nextUrl)
+    } catch {
+      // The request is already captured in component state; URL cleanup is best effort.
+    }
+  }, [])
 
   const refreshNetwork = useCallback(async ({ silent = false } = {}) => {
     setRefreshingNetwork(true)
@@ -3161,6 +3381,7 @@ export default function SelfCustodyApp() {
     setWalletStatus('idle')
     setWalletRecord(null)
     setSetupStatus(null)
+    setPaymentDeepLink((current) => ({ ...current, consumed: true }))
     setUser(null)
   }
 
@@ -3184,6 +3405,14 @@ export default function SelfCustodyApp() {
     setLastNetworkRefreshAt('')
     setWalletStatus('locked')
   }
+
+  useEffect(() => {
+    function handleHashChange() {
+      setPaymentDeepLink((current) => ({ ...readPaymentDeepLink(), id: current.id + 1 }))
+    }
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -3280,6 +3509,7 @@ export default function SelfCustodyApp() {
 
   return (
     <SelfCustodyDashboard
+      key={`wallet-${paymentDeepLink.id}`}
       user={user}
       nodeInfo={nodeInfo}
       peers={peers}
@@ -3293,6 +3523,8 @@ export default function SelfCustodyApp() {
       onSignOut={signOut}
       onRefreshNetwork={refreshNetwork}
       operatorInfo={operatorInfo}
+      paymentDeepLink={paymentDeepLink}
+      onPaymentDeepLinkConsumed={consumePaymentDeepLink}
     />
   )
 }

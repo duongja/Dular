@@ -1674,6 +1674,162 @@ a svg {
   overflow-wrap: anywhere;
 }
 
+.requestFormatTabs,
+.requestInputTabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.2rem;
+  padding: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+}
+
+.requestFormatTabs button,
+.requestInputTabs button {
+  min-width: 0;
+  min-height: 38px;
+  padding: 0.45rem 0.35rem;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.requestFormatTabs button.active,
+.requestInputTabs button.active {
+  border-color: var(--line-strong);
+  background: var(--surface);
+  color: var(--green-dark);
+  box-shadow: var(--shadow-soft);
+}
+
+.requestInputTabs {
+  margin-bottom: 1rem;
+}
+
+.requestFormatPanel {
+  display: grid;
+  justify-items: start;
+  gap: 0.75rem;
+  min-height: 126px;
+  padding-top: 1rem;
+}
+
+.requestFormatPanel code {
+  width: 100%;
+  margin: 0;
+}
+
+.qrRequestPanel {
+  justify-items: center;
+  text-align: center;
+}
+
+.qrRequestPanel p {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.paymentQrCode {
+  width: min(272px, 100%);
+  padding: 0.35rem;
+  background: #fff;
+}
+
+.paymentQrCode canvas {
+  display: block;
+  width: 100% !important;
+  height: auto !important;
+  aspect-ratio: 1;
+}
+
+.qrPaymentInput,
+.paymentQrScanner {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.qrPaymentInput {
+  margin-bottom: 1rem;
+}
+
+.qrVideoFrame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: #101614;
+}
+
+.qrVideoFrame video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.qrVideoFrame .scan-region-highlight-svg {
+  stroke: var(--green-light) !important;
+}
+
+.qrScannerActions > * {
+  flex: 1 1 150px;
+}
+
+.filePickerBtn {
+  cursor: pointer;
+}
+
+.filePickerBtn.disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.filePickerBtn input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.qrScannerMessage {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.scannedRequest {
+  min-width: 0;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line);
+}
+
+.scannedRequest span,
+.scannedRequest code {
+  display: block;
+}
+
+.scannedRequest span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 720;
+}
+
+.scannedRequest code {
+  margin-top: 0.3rem;
+  color: var(--ink);
+  font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
 .paymentResultCard {
   display: grid;
   gap: 0.8rem;
@@ -1971,6 +2127,11 @@ a svg {
 
   .safetyCard .buttonRow > * {
     flex: 1 1 130px;
+  }
+
+  .requestFormatTabs button,
+  .requestInputTabs button {
+    font-size: 0.68rem;
   }
 
   .bottomNav button {
