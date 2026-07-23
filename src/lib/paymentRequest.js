@@ -6,7 +6,7 @@ function normalizeFiberInvoice(value) {
   const invoice = String(value || '').trim()
   if (!invoice) throw new Error('A Fiber payment request is required')
   if (invoice.length > MAX_PAYMENT_REQUEST_LENGTH) throw new Error('The Fiber payment request is too long')
-  if (!/^fibt1[0-9a-z]+$/i.test(invoice)) throw new Error('This is not a valid Fiber testnet payment request')
+  if (!/^fibt[0-9a-z]{32,}$/i.test(invoice)) throw new Error('This is not a valid Fiber testnet payment request')
   return invoice
 }
 

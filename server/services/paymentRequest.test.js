@@ -9,10 +9,12 @@ import {
 } from '../../src/lib/paymentRequest.js'
 
 const INVOICE = `fibt1${'q'.repeat(530)}`
+const TWO_RUSD_INVOICE = `fibt2${'p'.repeat(530)}`
 
 describe('Fiber payment request formats', () => {
   it('keeps a raw Fiber invoice canonical', () => {
     assert.equal(extractPaymentRequest(`  ${INVOICE}  `), INVOICE)
+    assert.equal(extractPaymentRequest(TWO_RUSD_INVOICE), TWO_RUSD_INVOICE)
   })
 
   it('creates and extracts an invoice from a Dular fragment link', () => {

@@ -2002,7 +2002,15 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
   const qrCanvasRef = useRef(null)
   const needsOperatorRUsd = bootstrap?.nextAction === 'fund_operator_rusd'
   const paymentRequest = invoice?.invoice_address || ''
-  const paymentLink = paymentRequest ? createPaymentLink(paymentRequest, window.location.origin) : ''
+  let paymentLink = ''
+  let paymentLinkError = ''
+  if (paymentRequest) {
+    try {
+      paymentLink = createPaymentLink(paymentRequest, window.location.origin)
+    } catch (error) {
+      paymentLinkError = error.message || 'Could not create a payment link for this Fiber request.'
+    }
+  }
   const requestedAmountBaseUnits = invoice?.requestedAmountBaseUnits || invoice?.invoice?.amount || '0'
   const requestedDescription = invoice?.requestedDescription || description
 
@@ -2022,6 +2030,10 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
   }
 
   async function sharePaymentLink() {
+    if (!paymentLink) {
+      setShareStatus({ type: 'error', message: paymentLinkError || 'This payment link is not available.' })
+      return
+    }
     try {
       if (typeof navigator.share === 'function') {
         await navigator.share({
@@ -2197,13 +2209,19 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
           {shareFormat === 'link' && (
             <div className="requestFormatPanel">
               <span className="requestLabel">Dular payment link</span>
-              <code>{shortId(paymentLink, 28)}</code>
-              <div className="buttonRow wrapButtons">
-                <CopyButton value={paymentLink} label="Copy link" />
-                <button type="button" className="secondaryBtn iconTextBtn" onClick={sharePaymentLink}>
-                  <Share2 size={16} /> Share link
-                </button>
-              </div>
+              {paymentLink ? (
+                <>
+                  <code>{shortId(paymentLink, 28)}</code>
+                  <div className="buttonRow wrapButtons">
+                    <CopyButton value={paymentLink} label="Copy link" />
+                    <button type="button" className="secondaryBtn iconTextBtn" onClick={sharePaymentLink}>
+                      <Share2 size={16} /> Share link
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <p className="inputHint" role="alert">{paymentLinkError}</p>
+              )}
             </div>
           )}
           <Status state={shareStatus} />
