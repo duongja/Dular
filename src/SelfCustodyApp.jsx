@@ -3478,17 +3478,6 @@ export default function SelfCustodyApp() {
           partialErrors.push(`Could not reconnect to the Dular operator: ${error.message || 'request failed'}`)
         }
       }
-      try {
-        const diagnostics = await api('/fiber/browser/diagnostics', {
-          method: 'POST',
-          body: JSON.stringify({}),
-        })
-        if (!diagnostics.operatorSeesBrowserPeer) {
-          partialErrors.push('The Dular operator does not see this wallet online yet. Keep this tab open and refresh again.')
-        }
-      } catch (error) {
-        partialErrors.push(error.message || 'Could not verify the operator peer connection.')
-      }
     } else {
       partialErrors.push(operatorResult.reason?.message || 'Could not refresh operator capacity.')
     }
