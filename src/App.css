@@ -902,6 +902,42 @@ a svg {
   box-shadow: var(--shadow-soft);
 }
 
+.sendSegmented {
+  width: 100%;
+  margin-bottom: 1rem;
+}
+
+.sendModeBody {
+  padding-top: 0.15rem;
+}
+
+.phonePaymentConfirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.phonePaymentConfirm span,
+.phonePaymentConfirm strong {
+  display: block;
+}
+
+.phonePaymentConfirm span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 720;
+}
+
+.phonePaymentConfirm strong {
+  margin-top: 0.2rem;
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
 .mpesaRampCard {
   overflow: hidden;
 }

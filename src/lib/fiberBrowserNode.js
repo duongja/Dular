@@ -188,6 +188,17 @@ export async function browserSendPayment(invoice, { hopHints = [] } = {}) {
   })
 }
 
+export async function browserSendKeysend({ targetPubkey, amountHex, hopHints = [], dryRun = false }) {
+  return getBrowserFiber().sendPayment({
+    target_pubkey: targetPubkey,
+    amount: amountHex,
+    keysend: true,
+    udt_type_script: RUSD_TYPE_SCRIPT,
+    ...(hopHints.length ? { hop_hints: hopHints } : {}),
+    ...(dryRun ? { dry_run: true } : {}),
+  })
+}
+
 export async function browserBuildRouter({ amountHex, hopsInfo, finalTlcExpiryDelta }) {
   return getBrowserFiber().buildRouter({
     amount: amountHex,

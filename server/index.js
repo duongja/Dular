@@ -33,6 +33,7 @@ import { handleUssdRequest } from './services/ussd.js'
 import { registerRampRoutes } from './rampRoutes.js'
 import { validateRampInvoice } from './services/ramp.js'
 import { evaluateRampRouteFunding } from './services/rampRoutePolicy.js'
+import { evaluatePhonePaymentRoute } from './services/phonePaymentPolicy.js'
 import { evaluateReceiveRouteAuthorization } from './services/receiveRoutePolicy.js'
 import { evaluateWalletBinding } from './services/walletBindingPolicy.js'
 import { verifyCkbRegistrationProof } from './services/walletProof.js'
@@ -1741,6 +1742,151 @@ app.post('/api/fiber/browser/invoice-route', requireAuth, asyncHandler(async (re
     hopHints: hopHint ? [hopHint] : [],
     routeChannel,
     readyChannels,
+  })
+}))
+
+app.post('/api/fiber/browser/phone-route', requireAuth, asyncHandler(async (req, res) => {
+  const recipientPhone = normalizePhone(req.body.phone)
+  const amountBaseUnits = parseBaseUnits(req.body.amountBaseUnits)
+  const senderPubkey = String(req.body.senderPubkey || '').trim().toLowerCase().replace(/^0x/, '')
+  const authenticatedPubkey = String(req.user.fiber_pubkey || '').trim().toLowerCase().replace(/^0x/, '')
+  if (recipientPhone === req.user.phone) throw new Error('Cannot send to your own phone number')
+  if (!req.user.ckb_lock_arg || !/^[0-9a-f]{66}$/.test(authenticatedPubkey)) {
+    throw new Error('Register and unlock this browser wallet before sending')
+  }
+  if (senderPubkey !== authenticatedPubkey) {
+    throw new Error('This browser wallet does not match the authenticated account. Sign in again in this tab.')
+  }
+  if (amountBaseUnits > BigInt(config.ramp.maxRouteRUsdBaseUnits)) {
+    throw new Error('Phone payment amount is outside the current pilot limit')
+  }
+
+  const recipient = (await query(
+    `SELECT id, phone, fiber_pubkey, ckb_lock_arg, verified_at
+     FROM users WHERE phone = $1 AND verified_at IS NOT NULL`,
+    [recipientPhone],
+  )).rows[0]
+  const recipientPubkey = String(recipient?.fiber_pubkey || '').trim().toLowerCase().replace(/^0x/, '')
+  if (!recipient?.ckb_lock_arg || !/^[0-9a-f]{66}$/.test(recipientPubkey)) {
+    throw new Error('This phone number is not available for Fiber payments')
+  }
+
+  const [operator, peers, channels] = await Promise.all([
+    getNodeInfo(),
+    listFiberPeers(),
+    listChannelsByPeer(recipientPubkey),
+  ])
+  const connectedPeer = peers.peers?.find((peer) => peer.pubkey.toLowerCase() === recipientPubkey) || null
+  const route = evaluatePhonePaymentRoute({
+    amountBaseUnits,
+    connected: Boolean(connectedPeer),
+    channels: channels.channels || [],
+    udtTypeScript: RUSD_TYPE_SCRIPT,
+  })
+  const hopHint = route.routeChannel ? hopHintForChannel(operator.pubkey, route.routeChannel) : null
+  const routeReady = Boolean(route.routeReady && hopHint)
+  const reason = route.reason || (!hopHint ? 'The recipient Fiber route is not committed yet.' : null)
+
+  res.json({
+    ok: true,
+    mode: 'phone_keysend',
+    recipient: {
+      phone: recipient.phone,
+      fiberPubkey: recipientPubkey,
+      verifiedAt: recipient.verified_at,
+    },
+    operatorPubkey: operator.pubkey,
+    amountBaseUnits: amountBaseUnits.toString(),
+    senderRequiredOutboundBaseUnits: amountBaseUnits.toString(),
+    connected: Boolean(connectedPeer),
+    routeReady,
+    reason,
+    outboundLiquidity: route.outboundLiquidity.toString(),
+    hopHints: hopHint ? [hopHint] : [],
+    routeChannel: route.routeChannel,
+  })
+}))
+
+app.post('/api/payments/phone/record', requireAuth, asyncHandler(async (req, res) => {
+  const recipientPhone = normalizePhone(req.body.phone)
+  const amountBaseUnits = parseBaseUnits(req.body.amountBaseUnits)
+  const paymentHash = String(req.body.paymentHash || '').trim().toLowerCase()
+  const paymentStatus = String(req.body.status || '').trim()
+  const feeRaw = String(req.body.feeBaseUnits ?? '0').trim().toLowerCase()
+  if (recipientPhone === req.user.phone) throw new Error('Cannot record a payment to your own phone number')
+  if (!/^0x[0-9a-f]{64}$/.test(paymentHash)) throw new Error('A valid Fiber payment hash is required')
+  if (paymentStatus !== 'Success') throw new Error('Only successful Fiber phone payments can be recorded')
+  if (!/^(0x[0-9a-f]+|\d+)$/.test(feeRaw)) throw new Error('A valid Fiber payment fee is required')
+  const feeBaseUnits = BigInt(feeRaw)
+
+  const recorded = await withTransaction(async (client) => {
+    const recipient = (await client.query(
+      `SELECT id, phone, fiber_pubkey, ckb_lock_arg FROM users
+       WHERE phone = $1 AND verified_at IS NOT NULL`,
+      [recipientPhone],
+    )).rows[0]
+    if (!recipient?.ckb_lock_arg || !recipient.fiber_pubkey) {
+      throw new Error('This phone number is not available for Fiber payments')
+    }
+
+    const existing = (await client.query(
+      'SELECT * FROM fiber_payments WHERE payment_hash = $1 FOR UPDATE',
+      [paymentHash],
+    )).rows[0]
+    if (existing) {
+      if (existing.user_id !== req.user.id || existing.source_type !== 'phone_keysend') {
+        throw new Error('This Fiber payment hash is already recorded for another payment')
+      }
+      if (BigInt(existing.amount_base_units) !== amountBaseUnits
+        || existing.route?.[0]?.pubkey !== recipient.fiber_pubkey) {
+        throw new Error('This Fiber payment hash does not match the requested phone payment')
+      }
+      return { payment: existing, recipient, created: false }
+    }
+
+    const payment = (await client.query(
+      `INSERT INTO fiber_payments
+         (user_id, payment_hash, direction, amount_base_units, fee_base_units, status,
+          route, source_type, source_id)
+       VALUES ($1, $2, 'sent', $3, $4, 'Success', $5, 'phone_keysend', $2)
+       RETURNING *`,
+      [
+        req.user.id,
+        paymentHash,
+        amountBaseUnits.toString(),
+        feeBaseUnits.toString(),
+        JSON.stringify([{ pubkey: recipient.fiber_pubkey }]),
+      ],
+    )).rows[0]
+    await client.query(
+      `INSERT INTO audit_logs (actor_user_id, event_type, entity_type, entity_id, metadata)
+       VALUES ($1, 'phone_fiber_keysend_completed', 'fiber_payment', $2, $3)`,
+      [req.user.id, payment.id, {
+        recipientUserId: recipient.id,
+        recipientPhone: recipient.phone,
+        recipientFiberPubkey: recipient.fiber_pubkey,
+        amountBaseUnits: amountBaseUnits.toString(),
+        paymentHash,
+        reportedBy: 'sender_browser',
+      }],
+    )
+    return { payment, recipient, created: true }
+  })
+
+  res.json({
+    ok: true,
+    created: recorded.created,
+    payment: {
+      id: recorded.payment.id,
+      paymentHash: recorded.payment.payment_hash,
+      status: recorded.payment.status,
+      amountBaseUnits: String(recorded.payment.amount_base_units),
+      feeBaseUnits: String(recorded.payment.fee_base_units),
+    },
+    recipient: {
+      phone: recorded.recipient.phone,
+      fiberPubkey: recorded.recipient.fiber_pubkey,
+    },
   })
 }))
 

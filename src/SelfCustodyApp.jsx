@@ -37,6 +37,7 @@ import {
   browserListPeers,
   browserNodeInfo,
   browserOpenRUsdChannel,
+  browserSendKeysend,
   browserSendPayment,
   canUseBrowserFiber,
   getBrowserFiber,
@@ -760,11 +761,11 @@ function SelfCustodyDashboard({
           <div className="screenStack">
             <section className="flowHero">
               <p className="eyebrow">Send</p>
-              <h1>Pay a request</h1>
-              <p>Paste a payment request and send from your spendable RUSD balance.</p>
+              <h1>Send RUSD</h1>
+              <p>Pay a registered Dular number directly or use a Fiber payment request.</p>
             </section>
             <section className="contentCard mobileActionCard">
-              <PayInvoiceCard onRefreshNetwork={onRefreshNetwork} />
+              <SendCard nodeInfo={nodeInfo} onRefreshNetwork={onRefreshNetwork} />
             </section>
           </div>
         </section>
@@ -2144,6 +2145,26 @@ async function requestInvoiceRoute(invoice) {
   })
 }
 
+async function requestPhoneRoute({ phone, amountBaseUnits, senderPubkey }) {
+  return api('/fiber/browser/phone-route', {
+    method: 'POST',
+    body: JSON.stringify({ phone, amountBaseUnits, senderPubkey }),
+  })
+}
+
+async function recordPhonePayment({ phone, amountBaseUnits, payment }) {
+  return api('/payments/phone/record', {
+    method: 'POST',
+    body: JSON.stringify({
+      phone,
+      amountBaseUnits,
+      paymentHash: payment.payment_hash,
+      status: paymentStatusName(payment),
+      feeBaseUnits: payment.fee || '0',
+    }),
+  })
+}
+
 async function requestBrowserDiagnostics(pubkey, temporaryChannelId = '') {
   return api('/fiber/browser/diagnostics', {
     method: 'POST',
@@ -2637,6 +2658,248 @@ function PayInvoiceCard({ onRefreshNetwork }) {
   )
 }
 
+function PhonePaymentCard({ nodeInfo, onRefreshNetwork }) {
+  const [phone, setPhone] = useState('')
+  const [amount, setAmount] = useState('')
+  const [route, setRoute] = useState(null)
+  const [payment, setPayment] = useState(null)
+  const [status, setStatus] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  function updatePhone(value) {
+    setPhone(value)
+    setRoute(null)
+    setPayment(null)
+    setStatus(null)
+  }
+
+  function updateAmount(value) {
+    setAmount(value)
+    setRoute(null)
+    setPayment(null)
+    setStatus(null)
+  }
+
+  async function resolveRecipient(event) {
+    event.preventDefault()
+    setLoading(true)
+    setStatus(null)
+    setPayment(null)
+    setRoute(null)
+
+    try {
+      if (!nodeInfo?.pubkey) throw new Error('The browser wallet is still starting')
+      const amountBaseUnits = toBaseUnits(amount)
+      if (amountBaseUnits <= 0n) throw new Error('Enter an RUSD amount greater than zero')
+
+      const latestChannels = await browserListChannels()
+      const spendable = sumChannelBalance((latestChannels.channels || []).filter(isReadyChannel))
+      if (spendable < amountBaseUnits) {
+        throw new Error(`Not enough spendable RUSD. Available: ${formatRUsd(spendable)}.`)
+      }
+
+      const resolved = await requestPhoneRoute({
+        phone,
+        amountBaseUnits: amountBaseUnits.toString(),
+        senderPubkey: nodeInfo.pubkey,
+      })
+      if (!resolved.routeReady) {
+        setRoute(resolved)
+        throw new Error(resolved.reason || 'The recipient has no usable Fiber route right now')
+      }
+
+      const requiredOutbound = BigInt(resolved.senderRequiredOutboundBaseUnits || resolved.amountBaseUnits)
+      const { senderRoute, diagnostics } = await waitForSenderRouteChannel(resolved.operatorPubkey, requiredOutbound)
+      const nextRoute = {
+        ...resolved,
+        senderRouteChannel: senderRoute.channel,
+        senderRouteDiagnostics: diagnostics,
+      }
+      setRoute(nextRoute)
+      if (!senderRoute.channel) {
+        throw new Error(
+          `Not enough ready RUSD to send this payment. Needed ${formatRUsd(requiredOutbound)}, available route balance is ${formatRUsd(senderRoute.largestLocalBalance)}.`,
+        )
+      }
+      setStatus({ type: 'success', message: 'Registered recipient and Fiber route verified. Review the payment before sending.' })
+    } catch (error) {
+      setStatus({ type: 'error', message: errorMessage(error, 'Could not resolve this Dular number.') })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function sendPayment() {
+    if (!route?.routeReady || !route.recipient?.fiberPubkey) return
+    setLoading(true)
+    setStatus({ type: 'warning', message: 'Running a final Fiber route check...' })
+
+    try {
+      const amountBaseUnits = BigInt(route.amountBaseUnits)
+      const keysend = {
+        targetPubkey: route.recipient.fiberPubkey,
+        amountHex: baseUnitsHex(amountBaseUnits),
+        hopHints: route.hopHints || [],
+      }
+      await browserSendKeysend({ ...keysend, dryRun: true })
+      setStatus({ type: 'warning', message: 'Route verified. Sending RUSD over Fiber...' })
+      const submitted = await browserSendKeysend(keysend)
+      setPayment(submitted)
+      if (!submitted.payment_hash) {
+        setStatus({ type: 'warning', message: `Payment submitted, but Fiber returned no payment hash. Status: ${paymentStatusName(submitted)}.` })
+        return
+      }
+
+      setStatus({ type: 'warning', message: 'Payment submitted. Waiting for Fiber confirmation...' })
+      const finalResult = await waitForPaymentFinality(submitted.payment_hash, setPayment)
+      if (!finalResult.final) {
+        setStatus({ type: 'warning', message: `Payment is still ${paymentStatusName(finalResult.payment)}. Keep both wallets open.` })
+        return
+      }
+
+      let receiptRecorded = true
+      try {
+        await recordPhonePayment({
+          phone: route.recipient.phone,
+          amountBaseUnits: route.amountBaseUnits,
+          payment: finalResult.payment,
+        })
+      } catch {
+        receiptRecorded = false
+      }
+      setStatus({
+        type: receiptRecorded ? 'success' : 'warning',
+        message: receiptRecorded
+          ? `Payment completed to ${route.recipient.phone}.`
+          : `Payment completed to ${route.recipient.phone}, but the Dular receipt will need to be retried.`,
+      })
+      await onRefreshNetwork?.({ silent: true })
+    } catch (error) {
+      setStatus({ type: 'error', message: errorMessage(error, 'Could not send this phone payment.') })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function refreshPayment() {
+    if (!payment?.payment_hash) return
+    setLoading(true)
+    try {
+      const latest = await browserGetPayment(payment.payment_hash)
+      setPayment(latest)
+      const latestStatus = paymentStatusName(latest)
+      if (latestStatus === 'Success') {
+        await recordPhonePayment({
+          phone: route.recipient.phone,
+          amountBaseUnits: route.amountBaseUnits,
+          payment: latest,
+        })
+        await onRefreshNetwork?.({ silent: true })
+      }
+      setStatus({
+        type: latestStatus === 'Success' ? 'success' : isFailedPaymentStatus(latestStatus) ? 'error' : 'warning',
+        message: latestStatus === 'Success'
+          ? `Payment completed to ${route.recipient.phone}.`
+          : `Payment status refreshed: ${latestStatus}.`,
+      })
+    } catch (error) {
+      setStatus({ type: 'error', message: errorMessage(error, 'Could not refresh this phone payment.') })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <>
+      <form onSubmit={resolveRecipient}>
+        <p className="muted receiveNote">The recipient must be registered, online, and have enough Fiber receive capacity.</p>
+        <div className="formGroup">
+          <label htmlFor="fiber-phone-recipient">Dular phone number</label>
+          <input id="fiber-phone-recipient" type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(event) => updatePhone(event.target.value)} placeholder="0712 345 678" required />
+        </div>
+        <div className="formGroup">
+          <label htmlFor="fiber-phone-amount">Amount to send</label>
+          <div className="amountField">
+            <input id="fiber-phone-amount" value={amount} onChange={(event) => updateAmount(event.target.value)} inputMode="decimal" placeholder="1.00" required />
+            <span>RUSD</span>
+          </div>
+        </div>
+        <button type="submit" className="primaryBtn fullWidth" disabled={loading}>
+          {loading && !route ? 'Checking recipient...' : 'Check recipient'}<Smartphone size={18} />
+        </button>
+      </form>
+      <Status state={status} />
+      {route && (
+        <ProofDrawer summary="Phone route proof">
+          <ProofRow label="Recipient phone" value={route.recipient?.phone || phone} />
+          <ProofRow label="Fiber identity" value={route.recipient?.fiberPubkey || 'Unavailable'} />
+          <ProofRow label="Recipient online" value={route.connected ? 'Yes' : 'No'} />
+          <ProofRow label="Route ready" value={route.routeReady ? 'Yes' : 'No'} />
+          <ProofRow label="Amount" value={formatRUsd(route.amountBaseUnits || '0')} />
+          <ProofRow label="Inbound liquidity" value={formatRUsd(route.outboundLiquidity || '0')} />
+          {route.routeChannel?.channel_outpoint && <ProofRow label="Recipient route" value={route.routeChannel.channel_outpoint} />}
+          {route.senderRouteChannel?.channel_outpoint && <ProofRow label="Sender route" value={route.senderRouteChannel.channel_outpoint} />}
+          {route.reason && <ProofRow label="Route note" value={route.reason} />}
+        </ProofDrawer>
+      )}
+      {route?.routeReady && route.senderRouteChannel && !payment && (
+        <div className="phonePaymentConfirm">
+          <div>
+            <span>Ready to send</span>
+            <strong>{formatRUsd(route.amountBaseUnits)} to {route.recipient.phone}</strong>
+          </div>
+          <button type="button" className="primaryBtn" onClick={sendPayment} disabled={loading}>
+            {loading ? 'Sending...' : 'Send now'}<SendHorizontal size={18} />
+          </button>
+        </div>
+      )}
+      {payment && (
+        <div className="paymentResultCard">
+          <div>
+            <span>Payment status</span>
+            <strong>{paymentStatusName(payment)}</strong>
+            <p>{payment.payment_hash ? shortId(payment.payment_hash, 14) : 'Waiting for payment hash'}</p>
+          </div>
+          <div className="buttonRow wrapButtons">
+            <button type="button" className="secondaryBtn iconTextBtn" onClick={refreshPayment} disabled={loading}><RefreshCw size={16} className={loading ? 'spin' : ''} /> Check payment</button>
+            {payment.payment_hash && <CopyButton value={payment.payment_hash} label="Copy hash" />}
+          </div>
+          <ProofDrawer summary="Phone payment proof">
+            <ProofRow label="Recipient" value={route.recipient.phone} />
+            <ProofRow label="Fiber identity" value={route.recipient.fiberPubkey} />
+            <ProofRow label="Payment hash" value={payment.payment_hash || 'Pending'} />
+            <ProofRow label="Status" value={paymentStatusName(payment)} />
+            {payment.fee && <ProofRow label="Fee" value={payment.fee} />}
+            {payment.failed_error && <ProofRow label="Failure" value={payment.failed_error} />}
+          </ProofDrawer>
+        </div>
+      )}
+    </>
+  )
+}
+
+function SendCard({ nodeInfo, onRefreshNetwork }) {
+  const [mode, setMode] = useState('phone')
+
+  return (
+    <>
+      <div className="rampSegmented sendSegmented" role="group" aria-label="RUSD payment method">
+        <button type="button" className={mode === 'phone' ? 'active' : ''} aria-pressed={mode === 'phone'} onClick={() => setMode('phone')}>
+          <Smartphone size={16} /> Phone
+        </button>
+        <button type="button" className={mode === 'invoice' ? 'active' : ''} aria-pressed={mode === 'invoice'} onClick={() => setMode('invoice')}>
+          <SendHorizontal size={16} /> Payment request
+        </button>
+      </div>
+      <div className="sendModeBody">
+        {mode === 'phone'
+          ? <PhonePaymentCard nodeInfo={nodeInfo} onRefreshNetwork={onRefreshNetwork} />
+          : <PayInvoiceCard onRefreshNetwork={onRefreshNetwork} />}
+      </div>
+    </>
+  )
+}
+
 function ProofRow({ label, value }) {
   return (
     <div className="proofRow">
@@ -2687,8 +2950,9 @@ export default function SelfCustodyApp() {
     setNodeInfo(nextInfo)
 
     const partialErrors = []
+    let nextPeers = peersResult.status === 'fulfilled' ? peersResult.value : { peers: [] }
     if (peersResult.status === 'fulfilled') {
-      setPeers(peersResult.value)
+      setPeers(nextPeers)
     } else {
       partialErrors.push(peersResult.reason?.message || 'Could not refresh peers.')
     }
@@ -2701,6 +2965,32 @@ export default function SelfCustodyApp() {
 
     if (operatorResult.status === 'fulfilled') {
       setOperatorInfo(operatorResult.value)
+      const operator = operatorResult.value
+      const operatorPubkey = String(operator.operator?.pubkey || '').toLowerCase()
+      const operatorConnected = (nextPeers.peers || []).some(
+        (peer) => String(peer.pubkey || '').toLowerCase() === operatorPubkey,
+      )
+      if (operatorPubkey && operator.wsAddress && !operatorConnected) {
+        try {
+          const addrType = operator.addrType || (operator.wsAddress.includes('/wss') ? 'wss' : 'ws')
+          await browserConnectPeer({ address: operator.wsAddress, pubkey: operatorPubkey, addrType })
+          nextPeers = await browserListPeers()
+          setPeers(nextPeers)
+        } catch (error) {
+          partialErrors.push(`Could not reconnect to the Dular operator: ${error.message || 'request failed'}`)
+        }
+      }
+      try {
+        const diagnostics = await api('/fiber/browser/diagnostics', {
+          method: 'POST',
+          body: JSON.stringify({}),
+        })
+        if (!diagnostics.operatorSeesBrowserPeer) {
+          partialErrors.push('The Dular operator does not see this wallet online yet. Keep this tab open and refresh again.')
+        }
+      } catch (error) {
+        partialErrors.push(error.message || 'Could not verify the operator peer connection.')
+      }
     } else {
       partialErrors.push(operatorResult.reason?.message || 'Could not refresh operator capacity.')
     }
