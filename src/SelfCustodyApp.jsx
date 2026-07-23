@@ -17,6 +17,7 @@ import {
   ExternalLink,
   FileText,
   Home,
+  History,
   KeyRound,
   Landmark,
   Link2,
@@ -37,6 +38,7 @@ import {
   browserAbandonChannel,
   browserConnectPeer,
   browserCreateInvoice,
+  browserGetInvoice,
   browserGetPayment,
   browserListChannels,
   browserListPendingChannels,
@@ -79,10 +81,11 @@ const MIN_OPERATOR_CHANNEL_CAPACITY = 200n * 100000000n
 const CKB_TESTNET_FAUCET_URL = 'https://faucet.nervos.org/'
 const RUSD_TESTNET_FAUCET_URL = 'https://testnet0815.stablepp.xyz/stablecoin'
 const SELF_CUSTODY_NAV_ITEMS = [
-  { id: 'home', label: 'Dashboard', Icon: Home },
+  { id: 'home', label: 'Dashboard', mobileLabel: 'Home', Icon: Home },
   { id: 'mpesa', label: 'M-Pesa', Icon: Smartphone },
   { id: 'receive', label: 'Receive', Icon: ArrowDownLeft },
   { id: 'send', label: 'Send', Icon: ArrowUpRight },
+  { id: 'activity', label: 'Activity', Icon: History },
   { id: 'wallet', label: 'Wallet', Icon: WalletCards },
 ]
 
@@ -791,6 +794,10 @@ function SelfCustodyDashboard({
           </div>
         </section>
 
+        <section className="walletPanel" role="tabpanel" aria-label="Activity history" hidden={tab !== 'activity'}>
+          <UnifiedActivityScreen active={tab === 'activity'} />
+        </section>
+
         <section className="walletPanel" role="tabpanel" aria-label="Wallet security" hidden={tab !== 'wallet'}>
           <div className="screenStack">
             <section className="flowHero">
@@ -832,7 +839,7 @@ function SelfCustodyDashboard({
         </section>
       </div>
       <nav className="bottomNav" aria-label="Wallet navigation">
-        {SELF_CUSTODY_NAV_ITEMS.map(({ id, label, Icon }) => (
+        {SELF_CUSTODY_NAV_ITEMS.map(({ id, label, mobileLabel, Icon }) => (
           <button
             type="button"
             className={tab === id ? 'active' : ''}
@@ -841,7 +848,7 @@ function SelfCustodyDashboard({
             onClick={() => openTab(id)}
           >
             <Icon size={20} />
-            {label}
+            {mobileLabel || label}
           </button>
         ))}
       </nav>
@@ -1655,6 +1662,139 @@ function RampOrderItem({ order }) {
   )
 }
 
+function activityTone(status) {
+  const value = String(status || '').toLowerCase()
+  if (['success', 'completed', 'received', 'paid'].includes(value)) return 'success'
+  if (['failed', 'cancelled', 'canceled', 'expired', 'mpesa_failed', 'quote_expired', 'invoice_expired'].includes(value)) return 'error'
+  if (value === 'open' || value.includes('pending') || value.includes('sending') || value.includes('settling')) return 'pending'
+  return 'settling'
+}
+
+function activityIcon(kind) {
+  if (kind === 'mpesa_deposit' || kind === 'phone_receive' || kind === 'invoice_receive') return <ArrowDownLeft size={19} aria-hidden="true" />
+  if (kind === 'mpesa_withdrawal' || kind === 'phone_send' || kind === 'invoice_send') return <ArrowUpRight size={19} aria-hidden="true" />
+  if (kind === 'payment_request') return <FileText size={19} aria-hidden="true" />
+  if (kind === 'channel_activated' || kind === 'receive_route') return <Network size={19} aria-hidden="true" />
+  return <KeyRound size={19} aria-hidden="true" />
+}
+
+function UnifiedActivityItem({ item }) {
+  const tone = activityTone(item.status)
+  const sign = item.direction === 'in' ? '+' : item.direction === 'out' ? '-' : ''
+  const timestamp = item.createdAt
+    ? new Date(item.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+    : 'Time unavailable'
+
+  return (
+    <article className={`activityItem ${tone}`}>
+      <div className="activityIcon">{activityIcon(item.kind)}</div>
+      <div className="activityBody">
+        <div className="activityTop">
+          <div>
+            <strong>{item.title}</strong>
+            <p>{item.status || 'Recorded'}</p>
+          </div>
+          {item.amountBaseUnits !== null && item.amountBaseUnits !== undefined && (
+            <div className="activityAmount">
+              <strong>{sign}{formatRUsd(item.amountBaseUnits, true)}</strong>
+              <span>RUSD</span>
+            </div>
+          )}
+        </div>
+        <div className="activityMeta">
+          <span>{item.kesAmount ? formatKes(item.kesAmount) : item.detail}</span>
+          <span>{timestamp}</span>
+        </div>
+        <details className="proofDrawer compactProof">
+          <summary>Operation details</summary>
+          <ProofRow label="Type" value={item.kind} />
+          <ProofRow label="Status" value={item.status || 'Recorded'} />
+          {item.paymentHash && <ProofRow label="Fiber payment" value={item.paymentHash} />}
+          {item.phone && <ProofRow label="Dular number" value={item.phone} />}
+          {item.reference && <ProofRow label="Reference" value={item.reference} />}
+          {item.feeBaseUnits && BigInt(item.feeBaseUnits) > 0n && <ProofRow label="Fiber fee" value={formatRUsd(item.feeBaseUnits)} />}
+          {item.updatedAt && item.updatedAt !== item.createdAt && <ProofRow label="Last updated" value={new Date(item.updatedAt).toLocaleString()} />}
+        </details>
+      </div>
+    </article>
+  )
+}
+
+function UnifiedActivityScreen({ active }) {
+  const [rows, setRows] = useState([])
+  const [filter, setFilter] = useState('all')
+  const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState(null)
+
+  const loadActivity = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true)
+    try {
+      const result = await api('/activity')
+      setRows(result.activity || [])
+      setStatus(null)
+    } catch (error) {
+      setStatus({ type: 'error', message: errorMessage(error, 'Could not load wallet activity.') })
+    } finally {
+      if (!silent) setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!active) return undefined
+    const initialTimer = setTimeout(() => loadActivity(), 0)
+    const timer = setInterval(() => loadActivity({ silent: true }), 15000)
+    return () => {
+      clearTimeout(initialTimer)
+      clearInterval(timer)
+    }
+  }, [active, loadActivity])
+
+  const visibleRows = rows.filter((item) => {
+    if (filter === 'all') return true
+    if (filter === 'fiber') return ['fiber', 'request'].includes(item.category)
+    return item.category === filter
+  })
+
+  return (
+    <div className="screenStack">
+      <section className="flowHero activityHero">
+        <div>
+          <p className="eyebrow">Wallet history</p>
+          <h1>All activity</h1>
+          <p>M-Pesa, Fiber payments, requests, and wallet operations in one timeline.</p>
+        </div>
+        <button type="button" className="secondaryBtn iconTextBtn" onClick={() => loadActivity()} disabled={loading}>
+          <RefreshCw size={16} className={loading ? 'spin' : ''} /> {loading ? 'Updating' : 'Refresh'}
+        </button>
+      </section>
+      <section className="contentCard activityHistoryCard">
+        <div className="activityFilters" role="group" aria-label="Activity category">
+          {[
+            ['all', 'All'],
+            ['fiber', 'Fiber'],
+            ['mpesa', 'M-Pesa'],
+            ['wallet', 'Wallet'],
+          ].map(([value, label]) => (
+            <button type="button" className={filter === value ? 'active' : ''} aria-pressed={filter === value} onClick={() => setFilter(value)} key={value}>{label}</button>
+          ))}
+        </div>
+        <Status state={status} />
+        {visibleRows.length ? (
+          <div className="activityList">
+            {visibleRows.map((item) => <UnifiedActivityItem item={item} key={item.id} />)}
+          </div>
+        ) : (
+          <div className="emptyState">
+            <History size={26} aria-hidden="true" />
+            <strong>{loading ? 'Loading activity...' : 'No activity in this category'}</strong>
+            <span>Completed wallet operations will appear here.</span>
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
 function BetaFlowCard({ phase }) {
   const steps = [
     {
@@ -1848,6 +1988,14 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
         temporaryChannelId: opened.temporary_channel_id,
         openedAt,
       })
+      let activityRecordError = ''
+      if (finalChannel?.channel_id) {
+        try {
+          await recordChannelActivity(finalChannel.channel_id)
+        } catch (error) {
+          activityRecordError = errorMessage(error, 'Could not record channel activity.')
+        }
+      }
       setProof((current) => ({
         ...(current || {}),
         ...finalDiagnostics,
@@ -1855,6 +2003,7 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
         latestLocalBalance: finalRoute.largestLocalBalance.toString(),
         pendingChannels: finalChannel ? [] : finalPendingChannels,
         senderRouteDiagnostics: describeSenderRouteChannels(finalChannels, operatorPubkey),
+        activityRecordError,
       }))
       setStatus({
         type: finalChannel ? 'success' : 'warning',
@@ -1974,6 +2123,7 @@ function TopUpCard({ nodeInfo, walletAddress, funding, operatorInfo, onRefreshNe
           )}
           {proof.operatorDiagnostics?.operatorErrors?.length > 0 && <ProofRow label="Operator diagnostic errors" value={proof.operatorDiagnostics.operatorErrors.join(' | ')} />}
           {proof.diagnosticError && <ProofRow label="Browser diagnostic errors" value={proof.diagnosticError} />}
+          {proof.activityRecordError && <ProofRow label="Activity record" value={proof.activityRecordError} />}
           {proof.clearedOperatorChannels?.cleared?.length > 0 && <ProofRow label="Cleared operator stale" value={proof.clearedOperatorChannels.cleared.join(', ')} />}
           {proof.clearedOperatorChannels?.errors?.length > 0 && <ProofRow label="Operator cleanup errors" value={proof.clearedOperatorChannels.errors.join(' | ')} />}
           {proof.clearedChannels?.length > 0 && <ProofRow label="Cleared stale channels" value={proof.clearedChannels.join(', ')} />}
@@ -1999,7 +2149,9 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
   const [bootstrap, setBootstrap] = useState(null)
   const [shareFormat, setShareFormat] = useState('request')
   const [shareStatus, setShareStatus] = useState(null)
+  const [invoiceStatus, setInvoiceStatus] = useState('')
   const qrCanvasRef = useRef(null)
+  const recordedReceivedInvoices = useRef(new Set())
   const needsOperatorRUsd = bootstrap?.nextAction === 'fund_operator_rusd'
   const paymentRequest = invoice?.invoice_address || ''
   let paymentLink = ''
@@ -2013,6 +2165,50 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
   }
   const requestedAmountBaseUnits = invoice?.requestedAmountBaseUnits || invoice?.invoice?.amount || '0'
   const requestedDescription = invoice?.requestedDescription || description
+  const paymentHash = invoice?.payment_hash || invoice?.invoice?.data?.payment_hash || ''
+
+  useEffect(() => {
+    if (!paymentRequest || !paymentHash) return undefined
+    let active = true
+    let checking = false
+    let settled = false
+
+    async function checkInvoice() {
+      if (checking || settled) return
+      checking = true
+      try {
+        const latest = await browserGetInvoice(paymentHash)
+        if (!active) return
+        setInvoiceStatus(latest.status || 'Open')
+        if (['Received', 'Paid'].includes(latest.status)) {
+          let activityRecorded = recordedReceivedInvoices.current.has(paymentHash)
+          if (!recordedReceivedInvoices.current.has(paymentHash)) {
+            recordedReceivedInvoices.current.add(paymentHash)
+            try {
+              await recordReceivedInvoiceActivity(paymentRequest, latest.status)
+              activityRecorded = true
+            } catch {
+              recordedReceivedInvoices.current.delete(paymentHash)
+            }
+          }
+          settled = activityRecorded
+          setStatus({ type: 'success', message: `${formatRUsd(requestedAmountBaseUnits)} received over Fiber.` })
+          await onRefreshNetwork?.({ silent: true })
+        }
+      } catch {
+        // The invoice remains shareable while the browser node catches up.
+      } finally {
+        checking = false
+      }
+    }
+
+    checkInvoice()
+    const timer = setInterval(checkInvoice, 5000)
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [onRefreshNetwork, paymentHash, paymentRequest, requestedAmountBaseUnits])
 
   function selectShareFormat(format) {
     setShareFormat(format)
@@ -2120,6 +2316,7 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
     setStatus(null)
     setShareStatus(null)
     setShareFormat('request')
+    setInvoiceStatus('')
     setInvoice(null)
     setBootstrap(null)
 
@@ -2134,6 +2331,12 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
         requestedAmountBaseUnits: amountBaseUnits.toString(),
         requestedDescription: description,
       })
+      setInvoiceStatus('Open')
+      try {
+        await recordPaymentRequestActivity(result.invoice_address)
+      } catch (activityError) {
+        setShareStatus({ type: 'warning', message: `Request created, but activity recording will need a retry. ${errorMessage(activityError, '')}` })
+      }
       setStatus({ type: 'warning', message: 'Payment request created. Preparing it so another Dular wallet can pay...' })
       await prepareReceivingRoute({
         manageLoading: false,
@@ -2170,6 +2373,10 @@ function ReceiveCard({ nodeInfo, onRefreshNetwork }) {
       <Status state={status} />
       {invoice && (
         <div className="requestCard">
+          <div className="requestCardHeader">
+            <span className="requestLabel">Fiber request</span>
+            <span className={`activityState ${activityTone(invoiceStatus)}`}>{invoiceStatus || 'Open'}</span>
+          </div>
           <div className="requestFormatTabs" role="group" aria-label="Payment request format">
             <button type="button" className={shareFormat === 'request' ? 'active' : ''} aria-pressed={shareFormat === 'request'} onClick={() => selectShareFormat('request')}>
               <FileText size={16} /> Request
@@ -2301,6 +2508,39 @@ async function recordPhonePayment({ phone, amountBaseUnits, payment }) {
       status: paymentStatusName(payment),
       feeBaseUnits: payment.fee || '0',
     }),
+  })
+}
+
+async function recordPaymentRequestActivity(invoice) {
+  return api('/activity/payment-request', {
+    method: 'POST',
+    body: JSON.stringify({ invoice }),
+  })
+}
+
+async function recordInvoicePaymentActivity(invoice, payment) {
+  return api('/activity/fiber-payment', {
+    method: 'POST',
+    body: JSON.stringify({
+      invoice,
+      paymentHash: payment.payment_hash,
+      status: paymentStatusName(payment),
+      feeBaseUnits: payment.fee || '0',
+    }),
+  })
+}
+
+async function recordReceivedInvoiceActivity(invoice, status) {
+  return api('/activity/payment-received', {
+    method: 'POST',
+    body: JSON.stringify({ invoice, status }),
+  })
+}
+
+async function recordChannelActivity(channelId) {
+  return api('/activity/channel', {
+    method: 'POST',
+    body: JSON.stringify({ channelId }),
   })
 }
 
@@ -2728,10 +2968,20 @@ function PayInvoiceCard({
       setStatus({ type: 'warning', message: 'Payment submitted from your wallet. Waiting for Fiber confirmation...' })
       const finalResult = await waitForPaymentFinality(result.payment_hash, setPayment)
       const finalStatus = paymentStatusName(finalResult.payment)
+      let activityRecorded = true
+      if (finalResult.final) {
+        try {
+          await recordInvoicePaymentActivity(paymentInvoice, finalResult.payment)
+        } catch {
+          activityRecorded = false
+        }
+      }
       setStatus({
-        type: finalResult.final ? 'success' : 'warning',
+        type: finalResult.final && activityRecorded ? 'success' : 'warning',
         message: finalResult.final
-          ? 'Payment completed on Fiber.'
+          ? activityRecorded
+            ? 'Payment completed on Fiber.'
+            : 'Payment completed on Fiber, but activity recording will retry when you check the payment.'
           : `Payment is still ${finalStatus}. Keep both wallets open and refresh payment shortly.`,
       })
       await onRefreshNetwork?.({ silent: true })
@@ -2749,10 +2999,20 @@ function PayInvoiceCard({
       const latest = await browserGetPayment(payment.payment_hash)
       setPayment(latest)
       const status = paymentStatusName(latest)
+      let activityRecorded = true
+      if (status === 'Success') {
+        try {
+          await recordInvoicePaymentActivity(invoice, latest)
+        } catch {
+          activityRecorded = false
+        }
+      }
       setStatus({
-        type: status === 'Success' ? 'success' : isFailedPaymentStatus(status) ? 'error' : 'warning',
+        type: status === 'Success' && activityRecorded ? 'success' : isFailedPaymentStatus(status) ? 'error' : 'warning',
         message: status === 'Success'
-          ? 'Payment completed on Fiber.'
+          ? activityRecorded
+            ? 'Payment completed on Fiber.'
+            : 'Payment completed on Fiber, but its activity record could not be refreshed yet.'
           : `Payment status refreshed: ${status}.`,
       })
       if (status === 'Success') await onRefreshNetwork?.({ silent: true })

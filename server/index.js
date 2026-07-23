@@ -30,6 +30,7 @@ import {
 import { credit, debit, ensureLedgerAccount } from './services/ledger.js'
 import { createFiberBackedDepositSettlement } from './services/settlement.js'
 import { handleUssdRequest } from './services/ussd.js'
+import { mergeActivity } from './services/activity.js'
 import { registerRampRoutes } from './rampRoutes.js'
 import { validateRampInvoice } from './services/ramp.js'
 import { evaluateRampRouteFunding } from './services/rampRoutePolicy.js'
@@ -180,6 +181,32 @@ function invoicePayeePubkey(parsed) {
 
 function invoiceAmount(parsed) {
   return BigInt(parsed?.invoice?.amount || '0x0')
+}
+
+function invoicePaymentHash(parsed) {
+  return String(parsed?.invoice?.data?.payment_hash || parsed?.invoice?.data?.paymentHash || '').trim().toLowerCase()
+}
+
+function invoiceDescription(parsed) {
+  return String(invoiceAttrValue(parsed?.invoice, 'description', 'Description') || '').trim()
+}
+
+function parseNonNegativeBaseUnits(value, label) {
+  const raw = String(value ?? '0').trim().toLowerCase()
+  if (!/^(0x[0-9a-f]+|\d+)$/.test(raw)) throw new Error(`${label} must be a valid amount`)
+  return BigInt(raw)
+}
+
+async function insertAuditOnce(client, { actorUserId, eventType, entityType, entityId, metadata }) {
+  return client.query(
+    `INSERT INTO audit_logs (actor_user_id, event_type, entity_type, entity_id, metadata)
+     SELECT $1, $2, $3, $4, $5
+     WHERE NOT EXISTS (
+       SELECT 1 FROM audit_logs WHERE actor_user_id = $1 AND event_type = $2 AND entity_id = $4
+     )
+     RETURNING *`,
+    [actorUserId, eventType, entityType, entityId, metadata],
+  )
 }
 
 function invoiceAllowsHopHints(parsed) {
@@ -1096,6 +1123,14 @@ app.post('/api/fiber/register-device', requireAuth, asyncHandler(async (req, res
           operatorChannelCount,
         }],
       )
+    } else if (!current?.ckb_lock_arg) {
+      await insertAuditOnce(client, {
+        actorUserId: req.user.id,
+        eventType: 'wallet_identity_bound',
+        entityType: 'user',
+        entityId: req.user.id,
+        metadata: { fiberPubkey, fundingLockArg },
+      })
     }
 
     return nextUser
@@ -1243,6 +1278,204 @@ app.get('/api/transactions', requireAuth, asyncHandler(async (req, res) => {
     [req.user.id],
   )
   res.json({ transactions: result.rows })
+}))
+
+app.get('/api/activity', requireAuth, asyncHandler(async (req, res) => {
+  const [rampOrders, legacyMpesa, fiberPayments, audits] = await Promise.all([
+    query('SELECT * FROM ramp_orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100', [req.user.id]),
+    query('SELECT * FROM mpesa_transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100', [req.user.id]),
+    query(
+      `SELECT fp.*, COALESCE(activity_audit.metadata, '{}'::jsonb) AS activity_metadata
+       FROM fiber_payments fp
+       LEFT JOIN LATERAL (
+         SELECT metadata FROM audit_logs
+         WHERE entity_type = 'fiber_payment'
+           AND (entity_id = fp.id::text OR metadata->>'paymentHash' = fp.payment_hash)
+         ORDER BY created_at DESC LIMIT 1
+       ) activity_audit ON true
+       WHERE fp.user_id = $1
+       ORDER BY fp.created_at DESC LIMIT 100`,
+      [req.user.id],
+    ),
+    query(
+      `SELECT * FROM audit_logs
+       WHERE (actor_user_id = $1 AND event_type IN (
+         'fiber_payment_request_created',
+         'fiber_invoice_payment_received',
+         'wallet_channel_activated',
+         'receive_route_funding_reserved',
+         'legacy_wallet_identity_migrated',
+         'wallet_identity_bound'
+       )) OR (metadata->>'recipientUserId' = $1::text AND event_type IN (
+         'phone_fiber_keysend_completed',
+         'fiber_invoice_payment_completed'
+       ))
+       ORDER BY created_at DESC LIMIT 200`,
+      [req.user.id],
+    ),
+  ])
+
+  res.json({
+    activity: mergeActivity({
+      rampOrders: rampOrders.rows,
+      legacyMpesa: legacyMpesa.rows,
+      fiberPayments: fiberPayments.rows,
+      audits: audits.rows,
+      userId: req.user.id,
+      limit: 100,
+    }),
+  })
+}))
+
+app.post('/api/activity/payment-request', requireAuth, asyncHandler(async (req, res) => {
+  const invoice = String(req.body.invoice || '').trim()
+  if (!invoice) throw new Error('A Fiber payment request is required')
+  const parsed = await parseFiberInvoice(invoice)
+  const payeePubkey = invoicePayeePubkey(parsed)
+  const paymentHash = invoicePaymentHash(parsed)
+  const amountBaseUnits = invoiceAmount(parsed)
+  const accountPubkey = String(req.user.fiber_pubkey || '').trim().toLowerCase().replace(/^0x/, '')
+  if (payeePubkey !== accountPubkey) throw new Error('This payment request does not belong to the authenticated wallet')
+  if (!/^0x[0-9a-f]{64}$/.test(paymentHash)) throw new Error('The payment request has no valid payment hash')
+  if (amountBaseUnits <= 0n) throw new Error('The payment request amount must be greater than zero')
+
+  const recorded = await withTransaction(async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`activity-request-${paymentHash}`])
+    const result = await insertAuditOnce(client, {
+      actorUserId: req.user.id,
+      eventType: 'fiber_payment_request_created',
+      entityType: 'fiber_invoice',
+      entityId: paymentHash,
+      metadata: {
+        paymentHash,
+        amountBaseUnits: amountBaseUnits.toString(),
+        description: invoiceDescription(parsed),
+        status: 'Open',
+        reportedBy: 'browser_wallet',
+      },
+    })
+    return result.rows[0] || null
+  })
+  res.json({ ok: true, created: Boolean(recorded), paymentHash })
+}))
+
+app.post('/api/activity/fiber-payment', requireAuth, asyncHandler(async (req, res) => {
+  const invoice = String(req.body.invoice || '').trim()
+  const paymentHash = String(req.body.paymentHash || '').trim().toLowerCase()
+  const status = String(req.body.status || '').trim()
+  const feeBaseUnits = parseNonNegativeBaseUnits(req.body.feeBaseUnits, 'Fiber payment fee')
+  if (!invoice) throw new Error('A Fiber invoice is required')
+  if (status !== 'Success') throw new Error('Only successful Fiber payments can be recorded')
+  if (!/^0x[0-9a-f]{64}$/.test(paymentHash)) throw new Error('A valid Fiber payment hash is required')
+
+  const parsed = await parseFiberInvoice(invoice)
+  const invoiceHash = invoicePaymentHash(parsed)
+  const payeePubkey = invoicePayeePubkey(parsed)
+  const amountBaseUnits = invoiceAmount(parsed)
+  if (invoiceHash !== paymentHash) throw new Error('The Fiber payment hash does not match this invoice')
+  if (!/^[0-9a-f]{66}$/.test(payeePubkey) || amountBaseUnits <= 0n) throw new Error('The Fiber invoice is missing valid settlement details')
+
+  const recorded = await withTransaction(async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`activity-payment-${paymentHash}`])
+    const recipient = (await client.query(
+      `SELECT id, phone, fiber_pubkey FROM users
+       WHERE lower(fiber_pubkey) = $1 AND ckb_lock_arg IS NOT NULL AND verified_at IS NOT NULL`,
+      [payeePubkey],
+    )).rows[0] || null
+    const existing = (await client.query('SELECT * FROM fiber_payments WHERE payment_hash = $1 FOR UPDATE', [paymentHash])).rows[0]
+    let payment = existing
+    if (existing) {
+      if (existing.user_id !== req.user.id || existing.source_type !== 'invoice_payment'
+        || BigInt(existing.amount_base_units) !== amountBaseUnits) {
+        throw new Error('This Fiber payment hash is already recorded for another operation')
+      }
+    } else {
+      payment = (await client.query(
+        `INSERT INTO fiber_payments
+           (user_id, payment_hash, direction, amount_base_units, fee_base_units, status,
+            route, source_type, source_id)
+         VALUES ($1, $2, 'sent', $3, $4, 'Success', $5, 'invoice_payment', $2)
+         RETURNING *`,
+        [req.user.id, paymentHash, amountBaseUnits.toString(), feeBaseUnits.toString(), JSON.stringify([{ pubkey: payeePubkey }])],
+      )).rows[0]
+    }
+    await insertAuditOnce(client, {
+      actorUserId: req.user.id,
+      eventType: 'fiber_invoice_payment_completed',
+      entityType: 'fiber_payment',
+      entityId: payment.id,
+      metadata: {
+        senderPhone: req.user.phone,
+        recipientUserId: recipient?.id || null,
+        recipientPhone: recipient?.phone || null,
+        recipientFiberPubkey: payeePubkey,
+        amountBaseUnits: amountBaseUnits.toString(),
+        paymentHash,
+        reportedBy: 'sender_browser',
+      },
+    })
+    return { payment, recipient, created: !existing }
+  })
+  res.json({ ok: true, created: recorded.created, paymentHash, recipientPhone: recorded.recipient?.phone || null })
+}))
+
+app.post('/api/activity/payment-received', requireAuth, asyncHandler(async (req, res) => {
+  const invoice = String(req.body.invoice || '').trim()
+  const status = String(req.body.status || '').trim()
+  if (!invoice) throw new Error('A Fiber invoice is required')
+  if (!['Received', 'Paid'].includes(status)) throw new Error('The Fiber invoice has not been paid')
+  const parsed = await parseFiberInvoice(invoice)
+  const paymentHash = invoicePaymentHash(parsed)
+  const payeePubkey = invoicePayeePubkey(parsed)
+  const amountBaseUnits = invoiceAmount(parsed)
+  const accountPubkey = String(req.user.fiber_pubkey || '').trim().toLowerCase().replace(/^0x/, '')
+  if (payeePubkey !== accountPubkey) throw new Error('This Fiber invoice does not belong to the authenticated wallet')
+  if (!/^0x[0-9a-f]{64}$/.test(paymentHash) || amountBaseUnits <= 0n) throw new Error('The Fiber invoice has invalid settlement details')
+
+  const recorded = await withTransaction(async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`activity-received-${paymentHash}`])
+    const result = await insertAuditOnce(client, {
+      actorUserId: req.user.id,
+      eventType: 'fiber_invoice_payment_received',
+      entityType: 'fiber_invoice',
+      entityId: paymentHash,
+      metadata: { paymentHash, amountBaseUnits: amountBaseUnits.toString(), status, reportedBy: 'recipient_browser' },
+    })
+    return result.rows[0] || null
+  })
+  res.json({ ok: true, created: Boolean(recorded), paymentHash })
+}))
+
+app.post('/api/activity/channel', requireAuth, asyncHandler(async (req, res) => {
+  const channelId = String(req.body.channelId || '').trim().toLowerCase()
+  const pubkey = String(req.user.fiber_pubkey || '').trim().toLowerCase().replace(/^0x/, '')
+  if (!/^0x[0-9a-f]{64}$/.test(channelId) || !/^[0-9a-f]{66}$/.test(pubkey)) {
+    throw new Error('A valid ready channel is required')
+  }
+  const [channels, operator] = await Promise.all([listChannelsByPeer(pubkey), getNodeInfo()])
+  const channel = (channels.channels || []).find((item) => String(item.channel_id || '').toLowerCase() === channelId)
+  if (!channel || channelStateName(channel) !== 'ChannelReady' || !isRUsdChannel(channel)) {
+    throw new Error('This RUSD channel is not ready on the Dular operator')
+  }
+  const amountBaseUnits = BigInt(channel.remote_balance || '0x0')
+  const recorded = await withTransaction(async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`activity-channel-${channelId}`])
+    const result = await insertAuditOnce(client, {
+      actorUserId: req.user.id,
+      eventType: 'wallet_channel_activated',
+      entityType: 'fiber_channel',
+      entityId: channelId,
+      metadata: {
+        channelId,
+        channelOutpoint: channel.channel_outpoint || null,
+        amountBaseUnits: amountBaseUnits.toString(),
+        operatorPubkey: operator.pubkey,
+        reportedBy: 'browser_wallet',
+      },
+    })
+    return result.rows[0] || null
+  })
+  res.json({ ok: true, created: Boolean(recorded), channelId })
 }))
 
 app.get('/api/verification/deposit/:checkoutRequestId', asyncHandler(async (req, res) => {
@@ -1862,6 +2095,7 @@ app.post('/api/payments/phone/record', requireAuth, asyncHandler(async (req, res
       `INSERT INTO audit_logs (actor_user_id, event_type, entity_type, entity_id, metadata)
        VALUES ($1, 'phone_fiber_keysend_completed', 'fiber_payment', $2, $3)`,
       [req.user.id, payment.id, {
+        senderPhone: req.user.phone,
         recipientUserId: recipient.id,
         recipientPhone: recipient.phone,
         recipientFiberPubkey: recipient.fiber_pubkey,

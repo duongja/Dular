@@ -181,6 +181,10 @@ export async function browserCreateInvoice({ amountHex, description, expiry = '0
   })
 }
 
+export async function browserGetInvoice(paymentHash) {
+  return getBrowserFiber().getInvoice({ payment_hash: paymentHash })
+}
+
 export async function browserSendPayment(invoice, { hopHints = [] } = {}) {
   return getBrowserFiber().sendPayment({
     invoice,
