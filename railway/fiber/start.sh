@@ -21,6 +21,30 @@ fi
 
 mkdir -p "$FIBER_HOME/ckb" "$FIBER_HOME/fiber"
 
+if [[ ! -f "$FIBER_HOME/ckb/key" ]]; then
+  node --input-type=module <<'KEYGEN'
+import crypto from 'node:crypto'
+import fs from 'node:fs'
+const ckbKeyPath = `${process.env.FIBER_HOME}/ckb/key`
+if (!fs.existsSync(ckbKeyPath)) {
+  const password = Buffer.from(process.env.FIBER_SECRET_KEY_PASSWORD || '')
+  if (!password.length) { console.error('FIBER_SECRET_KEY_PASSWORD missing for key generation'); process.exit(1) }
+  const plain = crypto.randomBytes(32)
+  const salt = crypto.randomBytes(16)
+  const nonce = crypto.randomBytes(12)
+  const key = crypto.scryptSync(password, salt, 32, { N: 131072, r: 8, p: 1, maxmem_bytes: 64 * 1024 * 1024 })
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce)
+  const enc = Buffer.concat([cipher.update(plain), cipher.final()])
+  const tag = cipher.getAuthTag()
+  const ciphertext = Buffer.concat([enc, tag])
+  const fileBytes = Buffer.concat([Buffer.from([0]), salt, nonce, ciphertext])
+  fs.mkdirSync(`${process.env.FIBER_HOME}/ckb`, { recursive: true })
+  fs.writeFileSync(ckbKeyPath, fileBytes)
+  console.log(`Generated encrypted CKB key at ${ckbKeyPath}`)
+}
+KEYGEN
+fi
+
 if [[ ! -f "$FIBER_CONFIG" ]]; then
   cp "$FIBER_CONFIG_TEMPLATE" "$FIBER_CONFIG"
   echo "Created Fiber config at $FIBER_CONFIG"
