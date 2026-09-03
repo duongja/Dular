@@ -27,20 +27,10 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 const ckbKeyPath = `${process.env.FIBER_HOME}/ckb/key`
 if (!fs.existsSync(ckbKeyPath)) {
-  const password = Buffer.from(process.env.FIBER_SECRET_KEY_PASSWORD || '')
-  if (!password.length) { console.error('FIBER_SECRET_KEY_PASSWORD missing for key generation'); process.exit(1) }
-  const plain = crypto.randomBytes(32)
-  const salt = crypto.randomBytes(16)
-  const nonce = crypto.randomBytes(12)
-  const key = crypto.scryptSync(password, salt, 32, { N: 131072, r: 8, p: 1, maxmem_bytes: 256 * 1024 * 1024 })
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce)
-  const enc = Buffer.concat([cipher.update(plain), cipher.final()])
-  const tag = cipher.getAuthTag()
-  const ciphertext = Buffer.concat([enc, tag])
-  const fileBytes = Buffer.concat([Buffer.from([0]), salt, nonce, ciphertext])
+  const plainHex = crypto.randomBytes(32).toString('hex')
   fs.mkdirSync(`${process.env.FIBER_HOME}/ckb`, { recursive: true })
-  fs.writeFileSync(ckbKeyPath, fileBytes)
-  console.log(`Generated encrypted CKB key at ${ckbKeyPath}`)
+  fs.writeFileSync(ckbKeyPath, plainHex)
+  console.log(`Generated plaintext CKB key at ${ckbKeyPath} (will be auto-encrypted by Fiber)`)
 }
 KEYGEN
 fi
