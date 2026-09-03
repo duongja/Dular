@@ -23,9 +23,7 @@ RUN git clone --depth 1 --branch "$FIBER_REF" https://github.com/nervosnetwork/f
 
 ENV CARGO_TARGET_DIR=/usr/src/fiber/target
 
-RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry \
-    --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git \
-    cargo build --release --locked -p fiber-bin -p fnn-cli
+RUN cargo build --release --locked -p fiber-bin -p fnn-cli
 
 FROM node:22-bookworm-slim AS runtime
 
