@@ -32,7 +32,7 @@ if (!fs.existsSync(ckbKeyPath)) {
   const plain = crypto.randomBytes(32)
   const salt = crypto.randomBytes(16)
   const nonce = crypto.randomBytes(12)
-  const key = crypto.scryptSync(password, salt, 32, { N: 131072, r: 8, p: 1, maxmem_bytes: 64 * 1024 * 1024 })
+  const key = crypto.scryptSync(password, salt, 32, { N: 131072, r: 8, p: 1, maxmem_bytes: 256 * 1024 * 1024 })
   const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce)
   const enc = Buffer.concat([cipher.update(plain), cipher.final()])
   const tag = cipher.getAuthTag()
